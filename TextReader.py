@@ -26,7 +26,7 @@ def main():
     texts = TextReader("corpora")
     model = gensim.models.Word2Vec(texts, workers=8)
     model.save_word2vec_format("model.w2v")
-    print(model.accuracy('questions-words.txt'))
+    print(model.accuracy('datasets/questions-words.txt'))
 
 if __name__ == "__main__":
     main()
