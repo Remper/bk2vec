@@ -6,6 +6,7 @@ import math
 import os
 import random
 import zipfile
+import csv
 
 import numpy as np
 from six.moves import urllib
@@ -44,34 +45,37 @@ def read_relations(filename):
   dict = {}
   previous = []
   for name in f.namelist():
-    for line in f.open(name, "r").readlines():
-      relation = line.strip().split("\t")
-      if len(relation) is not 2:
-        print("Inconsistency in relations file. Previous:", previous, "Current:", relation)
-        continue
-      previous = relation
-      relation[1] = relation[1].split("-")[0].lower()
-      if relation[1] is 'us':
-        relation[1] = 'united_states'
-      if relation[1] not in reverse_dict:
-        reverse_dict[relation[1]] = []
-      reverse_dict[relation[1]].append(relation[0])
-      dict[relation[0]] = relation[1]
+    with f.open(name, 'r') as csvfile:
+      reader = csv.reader(csvfile, delimiter='\t')
+      for row in reader:
+        if len(row) is not 2:
+          print("Inconsistency in relations file. Previous:", previous, "Current:", row)
+          continue
+        previous = row
+        row[1] = row[1].split("-")[0].lower()
+        if row[1] is 'us':
+          row[1] = 'united_states'
+        if row[1] not in reverse_dict:
+          reverse_dict[row[1]] = []
+        reverse_dict[row[1]].append(row[0])
+        dict[row[0]] = row[1]
   return reverse_dict, dict
 
 words = read_data('enwiki-20160305-text.csv.zip')+read_data(filename)
 relations_dict, relations = read_relations('relations.zip')
-print('Data size', len(words))
-print('Relations size', len(relations), len(relations_dict.keys()))
+print('Data size', len(words), 'words')
+print('Relations size', len(relations), 'words in', len(relations_dict.keys()), 'categories')
 
 # Step 2: Build the dictionary and replace rare words with UNK token.
-vocabulary_size = 200000
+vocabulary_size = 500000
 
 def build_dataset(words, relations):
   count = [['UNK', -1]]
   count.extend(collections.Counter(words).most_common(vocabulary_size - 1))
   dictionary = dict()
   for word, _ in count:
+    if word in dictionary:
+      continue
     dictionary[word] = len(dictionary)
 
   data = list()
@@ -173,8 +177,8 @@ with graph.as_default():
   # Input data.
   train_inputs = tf.placeholder(tf.int32, shape=[batch_size])
   train_labels = tf.placeholder(tf.int32, shape=[batch_size, 1])
-  categories_input = list()
 
+  categories_input = list()
   for category in relations_dict_idx.keys():
     category_tensor = tf.constant(relations_dict_idx[category], name="category_input")
     categories_input.append(category_tensor)
@@ -199,27 +203,33 @@ with graph.as_default():
     nce_biases = tf.Variable(tf.zeros([vocabulary_size]))
 
   # Categorical knowledge additional term
-  losses = list()
-  for category in categories:
-    centroid = tf.matmul(tf.ones_like(category), tf.diag(tf.reduce_mean(category, 0)), name="centroid")
-    losses.append(tf.reduce_mean(tf.sqrt(tf.reduce_sum(tf.pow(tf.sub(
-      category, centroid), 2), 1), name="category_sqrt"), name="mean_loss_in_category"))
+  with tf.name_scope("category_loss") as scope:
+    losses = list()
+    for category in categories:
+      centroid = tf.matmul(tf.ones_like(category), tf.diag(tf.reduce_mean(category, 0)), name="centroid")
+      losses.append(tf.reduce_mean(tf.sqrt(tf.reduce_sum(tf.pow(tf.sub(
+        category, centroid), 2), 1), name="category_sqrt"), name="mean_loss_in_category"))
 
+    # Building join objective, normalizing second objective by the amount of categories
+    category_loss = tf.mul(tf.constant(1.0), tf.add_n(losses), name="category_loss")
+    category_loss_summary = tf.scalar_summary("category_loss", category_loss)
 
   # Compute the average NCE loss for the batch.
   # tf.nce_loss automatically draws a new sample of the negative labels each
   # time we evaluate the loss.
-  loss = tf.reduce_mean(
-    tf.nn.nce_loss(nce_weights, nce_biases, embed, train_labels,
-                   num_sampled, vocabulary_size), name="skipgram_loss")
+  with tf.name_scope("skipgram_loss") as scope:
+    loss = tf.reduce_mean(
+      tf.nn.nce_loss(nce_weights, nce_biases, embed, train_labels, num_sampled, vocabulary_size)
+      , name="skipgram_loss"
+    )
+    skipgram_loss_summary = tf.scalar_summary("skipgram_loss", loss)
 
-  # Building join objective, normalizing second objective by the amount of categories
-  category_loss = tf.mul(tf.constant(0.1),tf.add_n(losses), name="category_loss")
-  loss = tf.add(loss, category_loss, name="joint_loss")
+  joint_loss = tf.add(loss, category_loss, name="joint_loss")
 
   # Construct the SGD optimizer using a learning rate of 1.0.
-  optimizer = tf.train.GradientDescentOptimizer(1.0, name="joint_objective").minimize(loss)
-  #optimizer_category = tf.train.GradientDescentOptimizer(1.0, name="Category_loss").minimize(category_loss)
+  loss_summary = tf.scalar_summary("joint_loss", joint_loss)
+  skipgram_optimizer = tf.train.GradientDescentOptimizer(1.0, name="skipgram_objective").minimize(loss)
+  optimizer = tf.train.GradientDescentOptimizer(1.0, name="joint_objective").minimize(joint_loss)
 
   # Compute the cosine similarity between minibatch examples and all embeddings.
   norm = tf.sqrt(tf.reduce_sum(tf.square(embeddings), 1, keep_dims=True))
@@ -233,7 +243,9 @@ with graph.as_default():
 num_steps = 100001
 
 with tf.Session(graph=graph) as session:
-  tf.train.SummaryWriter("logs", session.graph_def)
+  # merged = tf.merge_all_summaries()
+  category_merged = tf.merge_summary([skipgram_loss_summary, loss_summary, category_loss_summary])
+  writer = tf.train.SummaryWriter("logs", session.graph_def)
   # We must initialize all variables before we use them.
   tf.initialize_all_variables().run()
   print("Initialized")
@@ -247,12 +259,18 @@ with tf.Session(graph=graph) as session:
 
     # We perform one update step by evaluating the optimizer op (including it
     # in the list of returned values for session.run()
-    _, loss_val = session.run([optimizer, loss], feed_dict=feed_dict)
-    # Second objective is being minimized only once per 20 batches
-    #if step % 20 == 0:
-      #__, loss_val2 = session.run([optimizer_category, category_loss], feed_dict=feed_dict)
-      #average_loss2 += loss_val2
+
+    if step % 20 == 0:
+      summary, _, loss_val = session.run([category_merged, optimizer, joint_loss], feed_dict=feed_dict)
+    else:
+      summary, _, loss_val = session.run([skipgram_loss_summary, skipgram_optimizer, loss], feed_dict=feed_dict)
+    writer.add_summary(summary, step)
+
     average_loss += loss_val
+
+    #Calculate category loss once in a while
+    #if step % 2000 == 0:
+    #  writer.add_summary(session.run(category_loss_summary, feed_dict=feed_dict), step)
 
     if step % 2000 == 0:
       if step > 0:
@@ -261,7 +279,6 @@ with tf.Session(graph=graph) as session:
       print("Average loss at step ", step, ": ", average_loss)
       #print("Average category loss at step ", step, ": ", average_loss2)
       average_loss = 0
-      average_loss2 = 0
 
     # Note that this is expensive (~20% slowdown if computed every 500 steps)
     if step % 10000 == 0:
@@ -270,14 +287,24 @@ with tf.Session(graph=graph) as session:
         valid_word = reverse_dictionary[valid_examples[i]]
         top_k = 8 # number of nearest neighbors
         nearest = (-sim[i, :]).argsort()[1:top_k+1]
-        log_str = "Nearest to %s:" % valid_word
+        log_str = u"Nearest to %s:" % valid_word
         for k in xrange(top_k):
           close_word = reverse_dictionary[nearest[k]]
-          log_str = "%s %s," % (log_str, close_word)
-        print(log_str)
+          log_str = u"%s %s," % (log_str, close_word)
+        print(log_str.encode('utf-8'))
   final_embeddings = normalized_embeddings.eval()
 
-# Step 6: Visualize the embeddings.
+# Step 6: Dump embeddings to file
+
+with open('embeddings.tsv', 'wb') as csvfile:
+  writer = csv.writer(csvfile, delimiter='\t', quoting=csv.QUOTE_NONNUMERIC)
+  for id, embedding in enumerate(final_embeddings):
+    if id not in reverse_dictionary:
+      print("Bullshit happened: ", id, embedding)
+      continue
+    writer.writerow([reverse_dictionary[id].encode('utf8')]+[str(value) for value in embedding])
+
+# Step 7: Visualize the embeddings.
 
 def plot_with_labels(low_dim_embs, labels, filename='tsne.png'):
   assert low_dim_embs.shape[0] >= len(labels), "More labels than embeddings"
