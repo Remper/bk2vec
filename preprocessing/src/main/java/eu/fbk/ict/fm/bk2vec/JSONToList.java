@@ -5,15 +5,13 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.tools.javac.util.Pair;
 import org.apache.commons.cli.*;
 import org.apache.log4j.Logger;
 import org.apache.log4j.PropertyConfigurator;
 
 import java.io.*;
-import java.util.Date;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * Converts relation jsons to a single csv list
@@ -22,6 +20,40 @@ import java.util.Map;
  */
 public class JSONToList {
     private static Logger logger = Logger.getLogger(JSONToList.class);
+    public final static double SPLIT = 0.1;
+
+    private Writer listHandler;
+    private Writer listHandlerTest;
+
+    public JSONToList(String outputFile, String testFile, Set<Pair<String, String>> list) throws IOException {
+        listHandler = openHandler(outputFile);
+        listHandlerTest = null;
+        if (testFile != null) {
+            listHandlerTest = openHandler(testFile);
+        }
+        writeList(list);
+        listHandler.close();
+        listHandlerTest.close();
+    }
+
+    private Writer openHandler(String file) throws IOException {
+        return new BufferedWriter(new FileWriter(new File(file)));
+    }
+
+    private void writeList(Set<Pair<String, String>> list) throws IOException {
+        Random rnd = new Random();
+        for (Pair<String, String> element : list) {
+            Writer currentWriter = listHandler;
+            double value = rnd.nextDouble();
+            if (listHandlerTest != null && value <= SPLIT) {
+                currentWriter = listHandlerTest;
+            }
+            currentWriter.write(element.fst);
+            currentWriter.write('\t');
+            currentWriter.write(element.snd);
+            currentWriter.write('\n');
+        }
+    }
 
     public static void main(String[] args) {
         String logConfig = System.getProperty("log-config");
@@ -35,6 +67,7 @@ public class JSONToList {
         try {
             options.addOption(Option.builder("l").desc("Location of jsons").required().hasArg().argName("list").longOpt("list").build());
             options.addOption(Option.builder("o").desc("Output file").required().hasArg().argName("file").longOpt("output").build());
+            options.addOption(Option.builder("t").desc("Output test file").hasArg().argName("file").longOpt("output-test").build());
             options.addOption(Option.builder().desc("Only unigrams").longOpt("unigrams").build());
 
             options.addOption("h", "help", false, "print this message");
@@ -47,13 +80,6 @@ public class JSONToList {
                 throw new ParseException("");
             }
 
-            Writer listHandler;
-            try {
-                listHandler = new BufferedWriter(new FileWriter(new File(line.getOptionValue("output"))));
-            } catch (IOException e) {
-                logger.error("Error while opening output file", e);
-                return;
-            }
             ObjectMapper mapper = new ObjectMapper();
             File list = new File(line.getOptionValue("list"));
             List<File> files = new LinkedList<>();
@@ -66,6 +92,7 @@ public class JSONToList {
             } else {
                 files.add(list);
             }
+            Set<Pair<String, String>> result = new HashSet<>();
             for (File file : files) {
                 try {
                     logger.info("Parsing file "+file.getName());
@@ -107,19 +134,21 @@ public class JSONToList {
                         if (name.contains("_")) {
                             continue;
                         }
-                        listHandler.write(name);
-                        listHandler.write('\t');
                         if (country == null) {
                             country = file.getName().substring(0, file.getName().indexOf('.'));
                         } else {
                             country = country.substring(country.lastIndexOf('/')+1);
                         }
-                        listHandler.write(country);
-                        listHandler.write('\n');
+                        result.add(new Pair<>(name, country));
                     }
                 } catch (IOException e) {
                     logger.error("Unable to load page list", e);
                 }
+            }
+            try {
+                new JSONToList(line.getOptionValue("output"), line.getOptionValue("output-test"), result);
+            } catch (IOException e) {
+                logger.error("Error while saving to disk", e);
             }
 
             logger.info("extraction ended " + new Date());
