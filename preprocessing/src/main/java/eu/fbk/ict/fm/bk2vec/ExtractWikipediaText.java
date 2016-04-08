@@ -14,7 +14,6 @@ import org.fbk.cit.hlt.thewikimachine.xmldump.AbstractWikipediaXmlDumpParser;
 import org.fbk.cit.hlt.thewikimachine.xmldump.WikipediaTextExtractor;
 
 import java.io.File;
-import java.io.FilenameFilter;
 import java.io.IOException;
 import java.util.*;
 
@@ -24,6 +23,7 @@ import java.util.*;
  * @author Yaroslav Nechaev (remper@me.com)
  */
 public class ExtractWikipediaText extends WikipediaTextExtractor {
+
     private static Logger logger = Logger.getLogger(ExtractWikipediaText.class);
     private List<String> pageList = new LinkedList<>();
 
@@ -53,12 +53,23 @@ public class ExtractWikipediaText extends WikipediaTextExtractor {
 
         Options options = new Options();
         try {
-            options.addOption(Option.builder("d").desc("Wikipedia xml dump file").required().hasArg().argName("file").longOpt("dump").build());
-            options.addOption(Option.builder("l").desc("List of pages to extract").hasArg().argName("list").longOpt("list").build());
-            options.addOption(Option.builder("o").desc("Output directory in which to store output files").required().hasArg().argName("file").longOpt("output").build());
-            options.addOption(Option.builder("t").desc("Number of threads (default " + AbstractWikipediaXmlDumpParser.DEFAULT_THREADS_NUMBER + ")").hasArg().argName("int").longOpt("threads").build());
-            options.addOption(Option.builder("p").desc("Number of pages to process (default all)").hasArg().argName("int").longOpt("pages").build());
-            options.addOption(Option.builder("n").desc("Receive notification every n pages (default " + AbstractWikipediaExtractor.DEFAULT_NOTIFICATION_POINT + ")").hasArg().argName("int").longOpt("notification").build());
+            options.addOption(Option.builder("d").desc("Wikipedia xml dump file").required().hasArg().argName("file")
+                    .longOpt("dump").build());
+            options.addOption(
+                    Option.builder("l").desc("List of pages to extract").hasArg().argName("list").longOpt("list")
+                            .build());
+            options.addOption(
+                    Option.builder("o").desc("Output directory in which to store output files").required().hasArg()
+                            .argName("file").longOpt("output").build());
+            options.addOption(Option.builder("t")
+                    .desc("Number of threads (default " + AbstractWikipediaXmlDumpParser.DEFAULT_THREADS_NUMBER + ")")
+                    .hasArg().argName("int").longOpt("threads").build());
+            options.addOption(
+                    Option.builder("p").desc("Number of pages to process (default all)").hasArg().argName("int")
+                            .longOpt("pages").build());
+            options.addOption(Option.builder("n").desc("Receive notification every n pages (default "
+                    + AbstractWikipediaExtractor.DEFAULT_NOTIFICATION_POINT + ")").hasArg().argName("int")
+                    .longOpt("notification").build());
 
             options.addOption("h", "help", false, "print this message");
             options.addOption("v", "version", false, "output version information and exit");
@@ -85,8 +96,10 @@ public class ExtractWikipediaText extends WikipediaTextExtractor {
                 notificationPoint = Integer.parseInt(line.getOptionValue("notification"));
             }
 
-            ExtractorParameters extractorParameters = new ExtractorParameters(line.getOptionValue("dump"), line.getOptionValue("output"));
-            ExtractWikipediaText wikipediaPageParser = new ExtractWikipediaText(numThreads, numPages, extractorParameters.getLocale());
+            ExtractorParameters extractorParameters = new ExtractorParameters(line.getOptionValue("dump"),
+                    line.getOptionValue("output"));
+            ExtractWikipediaText wikipediaPageParser = new ExtractWikipediaText(numThreads, numPages,
+                    extractorParameters.getLocale());
             wikipediaPageParser.setNotificationPoint(notificationPoint);
 
             if (line.hasOption("list")) {
@@ -105,7 +118,7 @@ public class ExtractWikipediaText extends WikipediaTextExtractor {
                 }
                 for (File file : files) {
                     try {
-                        logger.info("Parsing file "+file.getName());
+                        logger.info("Parsing file " + file.getName());
                         JsonParser parser = new JsonFactory().createParser(file);
 
                         parser.nextToken();
@@ -127,7 +140,10 @@ public class ExtractWikipediaText extends WikipediaTextExtractor {
                         }
                         parser.nextToken();
                         while (parser.nextToken() != JsonToken.END_ARRAY) {
-                            Map<String, Object> rawCity = mapper.readValue(parser, new TypeReference<Map<String, Object>>() {});
+                            Map<String, Object> rawCity = mapper
+                                    .readValue(parser, new TypeReference<Map<String, Object>>() {
+
+                                    });
                             if (rawCity == null) {
                                 continue;
                             }
@@ -139,7 +155,7 @@ public class ExtractWikipediaText extends WikipediaTextExtractor {
                             if (name == null || !(name instanceof String)) {
                                 continue;
                             }
-                            pages.add(((String) name).substring(((String) name).lastIndexOf('/')+1));
+                            pages.add(((String) name).substring(((String) name).lastIndexOf('/') + 1));
                         }
                     } catch (IOException e) {
                         logger.error("Unable to load page list", e);
@@ -155,7 +171,9 @@ public class ExtractWikipediaText extends WikipediaTextExtractor {
             // oops, something went wrong
             System.out.println("Parsing failed: " + e.getMessage() + "\n");
             HelpFormatter formatter = new HelpFormatter();
-            formatter.printHelp(400, "java -cp dist/thewikimachine.jar org.fbk.cit.hlt.thewikimachine.xmldump.WikipediaTextExtractor", "\n", options, "\n", true);
+            formatter.printHelp(400,
+                    "java -cp dist/thewikimachine.jar org.fbk.cit.hlt.thewikimachine.xmldump.WikipediaTextExtractor",
+                    "\n", options, "\n", true);
         }
     }
 }
