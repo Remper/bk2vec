@@ -60,6 +60,8 @@ def build_pages(filename, dictionary):
   maxPages = 0
   found = 0
   notfound = 0
+  category_found = 0
+  category_notfound = 0
   with gzip.open(filename, 'rb') as csvfile:
     reader = csv.reader(csvfile, delimiter='\t')
     try:
@@ -75,14 +77,20 @@ def build_pages(filename, dictionary):
         if page_index not in pages:
           pages[page_index] = list()
         page_categories = pages[page_index]
-        page_categories.extend(row[1:])
+        for word in row[1:]:
+          if word not in dictionary:
+            category_notfound += 1
+            continue
+          category_found += 1
+          page_categories.append(dictionary[word])
         if len(page_categories) > maxPages:
           maxPages = len(page_categories)
           maxPagesTitle = page_title
     except csv.Error:
       print(u"Dunno why this error happens")
   print(len(pages), "pages parsed.", "Page with most categories: ", maxPagesTitle, "with", maxPages, "categories")
-  print("Found:", found, "Not found:", notfound)
+  print("Pages found:", found, "Pages not found:", notfound)
+  print("Categories found:", category_found, "Categories not found:", category_notfound)
   return pages
 
 
@@ -167,7 +175,7 @@ for i in range(8):
 # Step 4: Build and train a skip-gram model.
 
 batch_size = 64
-embedding_size = 128  # Dimension of the embedding vector.
+embedding_size = 64  # Dimension of the embedding vector.
 skip_window = 1       # How many words to consider left and right.
 num_skips = 2         # How many times to reuse an input to generate a label.
 
@@ -197,11 +205,6 @@ with graph.as_default():
   train_inputs = tf.placeholder(tf.int32, shape=[batch_size])
   train_labels = tf.placeholder(tf.int32, shape=[batch_size, 1])
 
-  # Allocating index information for every page
-  categories_input = dict()
-  for page in pages:
-    category_tensor = tf.constant(pages[page], name="categories_input")
-    categories_input[page] = category_tensor
   valid_dataset = tf.constant(valid_examples, dtype=tf.int32)
 
   # Ops and variables pinned to the CPU because of missing GPU implementation
@@ -231,6 +234,7 @@ with graph.as_default():
       true_indices.append([tf.constant([page, i]) for i in pages[page]])
     category_mask = tf.SparseTensor(indices=true_indices, values=tf.constant(True, shape=[value_count]), shape=[vocabulary_size, vocabulary_size])
     del true_indices
+    del pages
     print("Indices built")
 
   # Recalculating centroids for words in a batch
