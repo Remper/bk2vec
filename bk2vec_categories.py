@@ -55,6 +55,7 @@ def build_dictionary(reader):
 
 # Limiter if there are performance issues
 max_pages = 0
+max_categories_per_page = 0
 
 def build_pages(filename, dictionary):
   global max_pages
@@ -76,6 +77,8 @@ def build_pages(filename, dictionary):
         found += 1
         if max_pages > 0 and found > max_pages:
           break
+        if max_categories_per_page > 0 and len(row) > max_categories_per_page+1:
+          row = row[:max_categories_per_page+1]
         if found % 1000000 == 0:
           print("  " + str(found // 1000000) + "m pages parsed")
         page_index = dictionary[page_title]
@@ -225,9 +228,10 @@ with graph.as_default():
     for page in pages.keys():
       value_count += len(pages[page])
       pages_parsed += 1
-      true_indices.extend([tf.constant([page, i]) for i in pages[page]])
-      if pages_parsed % 100000 == 0:
-        print("  " + str(pages_parsed // 100000) + "00k pages converted")
+      for i in pages[page]:
+        true_indices.append(tf.constant([page, i]))
+      if pages_parsed % 50000 == 0:
+        print("  " + str(pages_parsed // 10000) + "0k pages converted")
     category_mask = tf.SparseTensor(indices=true_indices, values=tf.constant(True, shape=[value_count]),
                                     shape=[vocabulary_size, vocabulary_size])
     del true_indices
