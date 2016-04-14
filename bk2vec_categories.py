@@ -53,8 +53,11 @@ def build_dictionary(reader):
   print("Parsing finished")
   return dictionary, reverse_dictionary
 
+# Limiter if there are performance issues
+max_pages = 0
 
 def build_pages(filename, dictionary):
+  global max_pages
   pages = dict()
   maxPagesTitle = "Unknown"
   maxPages = 0
@@ -71,6 +74,8 @@ def build_pages(filename, dictionary):
           notfound += 1
           continue
         found += 1
+        if max_pages > 0 and found > max_pages:
+          break
         if found % 1000000 == 0:
           print("  " + str(found // 1000000) + "m pages parsed")
         page_index = dictionary[page_title]
@@ -130,7 +135,6 @@ else:
 vocabulary_size = len(dictionary)
 print('Vocabulary size: ', vocabulary_size)
 pages = build_pages(CATEGORIES, dictionary)
-
 
 def word_provider(filename):
   while True:
@@ -207,6 +211,29 @@ with graph.as_default():
 
   valid_dataset = tf.constant(valid_examples, dtype=tf.int32)
 
+  # Allocating categorial knowledge on a GPU
+  with tf.device('/cpu:0'):
+
+    # Generating a boolean mask for page categories
+    # category_mask shape is vocabulary_size x vocabulary_size
+
+    # pages = dict() page index -> category indices
+    print("Building indices")
+    value_count = 0
+    pages_parsed = 0
+    true_indices = list()
+    for page in pages.keys():
+      value_count += len(pages[page])
+      pages_parsed += 1
+      true_indices.extend([tf.constant([page, i]) for i in pages[page]])
+      if pages_parsed % 100000 == 0:
+        print("  " + str(pages_parsed // 100000) + "00k pages converted")
+    category_mask = tf.SparseTensor(indices=true_indices, values=tf.constant(True, shape=[value_count]),
+                                    shape=[vocabulary_size, vocabulary_size])
+    del true_indices
+    del pages
+    print("Indices built")
+
   # Ops and variables pinned to the CPU because of missing GPU implementation
   with tf.device('/cpu:0'):
     # Look up embeddings for inputs.
@@ -219,23 +246,6 @@ with graph.as_default():
         tf.truncated_normal([vocabulary_size, embedding_size],
                             stddev=1.0 / math.sqrt(embedding_size)))
     nce_biases = tf.Variable(tf.zeros([vocabulary_size]))
-
-  # Allocating categorial knowledge on a GPU
-  with tf.device('/cpu:0'):
-
-    # Generating a boolean mask for page categories
-    # category_mask shape is vocabulary_size x vocabulary_size
-
-    # pages = dict() page index -> category indices
-    value_count = 0
-    true_indices = list()
-    for page in pages:
-      value_count += len(pages[page])
-      true_indices.append([tf.constant([page, i]) for i in pages[page]])
-    category_mask = tf.SparseTensor(indices=true_indices, values=tf.constant(True, shape=[value_count]), shape=[vocabulary_size, vocabulary_size])
-    del true_indices
-    del pages
-    print("Indices built")
 
   # Recalculating centroids for words in a batch
   with tf.name_scope("category_centroids"):
