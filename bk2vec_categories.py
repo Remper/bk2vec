@@ -40,6 +40,7 @@ def build_dictionary(reader):
   counts = dict()
   processed = 0
   for word in reader:
+    word = str(word)
     processed += 1
     if processed % 100000000 == 0:
       print("  " + str(processed // 100000000) + "00m words parsed (last:", word, ", dic size:", len(dictionary), ")")
@@ -50,23 +51,26 @@ def build_dictionary(reader):
     reverse_dictionary[dictionary[word]] = word
     counts[word] = 0
   print("Parsing finished")
-  counts = sorted(counts, key=counts.__getitem__, reverse=True)
-  print("Sorting finished")
-  return counts, dictionary, reverse_dictionary
+  return dictionary, reverse_dictionary
 
 
 def build_pages(filename, dictionary):
   pages = dict()
   maxPagesTitle = "Unknown"
   maxPages = 0
+  found = 0
+  notfound = 0
   with gzip.open(filename, 'rb') as csvfile:
     reader = csv.reader(csvfile, delimiter='\t')
     try:
       for row in reader:
         page_title = row[0]
         if page_title not in dictionary:
-          print("Page ", page_title, " haven't been found in a dictionary")
+          notfound += 1
           continue
+        found += 1
+        if found % 1000000 == 0:
+          print("  " + str(found // 1000000) + "m pages parsed")
         page_index = dictionary[page_title]
         if page_index not in pages:
           pages[page_index] = list()
@@ -77,52 +81,47 @@ def build_pages(filename, dictionary):
           maxPagesTitle = page_title
     except csv.Error:
       print(u"Dunno why this error happens")
-  print(len(pages), "parsed.", "Page with most categories: ", maxPagesTitle, "with", maxPages, "categories")
+  print(len(pages), "pages parsed.", "Page with most categories: ", maxPagesTitle, "with", maxPages, "categories")
+  print("Found:", found, "Not found:", notfound)
   return pages
 
 
 def restore_dictionary(filename):
   dictionary = dict()
   reverse_dictionary = dict()
-  counts = dict()
+  processed = 0
   with open(filename + "_dict", 'rb') as csvfile:
     reader = csv.reader(csvfile, delimiter='\t')
     for row in reader:
+      row[0] = str(row[0])
+      row[1] = int(row[1])
+      processed += 1
+      if processed % 3000000 == 0:
+        print("  " + str(processed // 1000000) + "m words parsed")
       dictionary[row[0]] = row[1]
       reverse_dictionary[row[1]] = row[0]
-  with open(filename + "_counts", 'rb') as csvfile:
-    reader = csv.reader(csvfile, delimiter='\t')
-    for row in reader:
-      counts[row[0]] = row[1]
-  return counts, dictionary, reverse_dictionary
+  return dictionary, reverse_dictionary
 
 
-def store_dictionary(dictionary, counts, filename):
-  with open(filename+  "_dict", 'wb') as csvfile:
-    writer = csv.writer(csvfile, delimiter='\t', quoting=csv.QUOTE_NONE)
+def store_dictionary(dictionary, filename):
+  with open(filename +  "_dict", 'wb') as csvfile:
+    writer = csv.writer(csvfile, delimiter='\t', quoting=csv.QUOTE_NONE, quotechar='')
     for value in dictionary.keys():
       writer.writerow([value, dictionary[value]])
-  with open(filename + "_counts", 'wb') as csvfile:
-    writer = csv.writer(csvfile, delimiter='\t', quoting=csv.QUOTE_NONE)
-    for value in counts.keys():
-      writer.writerow([value, counts[value]])
 
 
 if os.path.exists(TEXTS+"_dict"):
-  print('Restoring dictionary and counts')
-  counts, dictionary, reverse_dictionary = restore_dictionary(TEXTS)
+  print('Restoring dictionary')
+  dictionary, reverse_dictionary = restore_dictionary(TEXTS)
   print('Done')
 else:
-  counts, dictionary, reverse_dictionary = build_dictionary(wordreader(TEXTS))
-  print('Storing dictionary and counts')
-  store_dictionary(dictionary, counts, TEXTS)
+  dictionary, reverse_dictionary = build_dictionary(wordreader(TEXTS))
+  print('Storing dictionary')
+  store_dictionary(dictionary, TEXTS)
   print('Done')
 vocabulary_size = len(dictionary)
 print('Vocabulary size: ', vocabulary_size)
 pages = build_pages(CATEGORIES, dictionary)
-print('Most common words:')
-for word in counts.keys()[:5]:
-  print('  ', word, counts[word])
 
 
 def word_provider(filename):
@@ -167,7 +166,7 @@ for i in range(8):
   print(reverse_dictionary[batch[i]], '->', reverse_dictionary[labels[i, 0]])
 # Step 4: Build and train a skip-gram model.
 
-batch_size = 128
+batch_size = 64
 embedding_size = 128  # Dimension of the embedding vector.
 skip_window = 1       # How many words to consider left and right.
 num_skips = 2         # How many times to reuse an input to generate a label.
@@ -200,7 +199,6 @@ with graph.as_default():
 
   # Allocating index information for every page
   categories_input = dict()
-  pages = dict() # TODO: make this one real
   for page in pages:
     category_tensor = tf.constant(pages[page], name="categories_input")
     categories_input[page] = category_tensor
@@ -220,7 +218,7 @@ with graph.as_default():
     nce_biases = tf.Variable(tf.zeros([vocabulary_size]))
 
   # Allocating categorial knowledge on a GPU
-  with tf.device('/gpu:0'):
+  with tf.device('/cpu:0'):
 
     # Generating a boolean mask for page categories
     # category_mask shape is vocabulary_size x vocabulary_size
@@ -233,6 +231,7 @@ with graph.as_default():
       true_indices.append([tf.constant([page, i]) for i in pages[page]])
     category_mask = tf.SparseTensor(indices=true_indices, values=tf.constant(True, shape=[value_count]), shape=[vocabulary_size, vocabulary_size])
     del true_indices
+    print("Indices built")
 
   # Recalculating centroids for words in a batch
   with tf.name_scope("category_centroids"):
@@ -304,9 +303,8 @@ with tf.Session(graph=graph) as session:
   average_loss = 0
   average_loss2 = 0
   for step in xrange(num_steps):
-    batch_inputs, batch_labels   = generate_batch(
-        batch_size, num_skips, skip_window)
-    feed_dict = {train_inputs : batch_inputs, train_labels : batch_labels}
+    batch_inputs, batch_labels = generate_batch(data_reader, dictionary, batch_size, num_skips, skip_window)
+    feed_dict = {train_inputs: batch_inputs, train_labels: batch_labels}
 
     # We perform one update step by evaluating the optimizer op (including it
     # in the list of returned values for session.run()
