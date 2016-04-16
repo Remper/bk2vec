@@ -12,8 +12,11 @@ import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 
-TEXTS = '/Users/remper/Downloads/bk2vec_input/enwiki-20140203-text-cleaned.csv.gz'
-CATEGORIES = '/Users/remper/Downloads/bk2vec_input/enwiki-20140203-page-category-out.csv.gz'
+#TEXTS = '/Users/remper/Downloads/bk2vec_input/enwiki-20140203-text-cleaned.csv.gz'
+#CATEGORIES = '/Users/remper/Downloads/bk2vec_input/enwiki-20140203-page-category-out.csv.gz'
+# Borean
+TEXTS = '/borean1/data/pokedem-experiments/bk2vec/alessio/enwiki-20140203-text-cleaned.csv.gz'
+CATEGORIES = '/borean1/data/pokedem-experiments/bk2vec/alessio/enwiki-20140203-page-category-out.csv.gz'
 
 # Increasing limit for CSV parser
 csv.field_size_limit(2147483647)
@@ -54,7 +57,7 @@ def build_dictionary(reader):
   return dictionary, reverse_dictionary
 
 # Limiter if there are performance issues
-max_pages = 500
+max_pages = 0
 max_categories_per_page = 0
 
 def build_pages(filename, dictionary):
@@ -186,7 +189,7 @@ for i in range(8):
 # Step 4: Build and train a skip-gram model.
 
 batch_size = 128
-embedding_size = 16  # Dimension of the embedding vector.
+embedding_size = 80  # Dimension of the embedding vector.
 skip_window = 1       # How many words to consider left and right.
 num_skips = 2         # How many times to reuse an input to generate a label.
 
@@ -201,7 +204,7 @@ num_sampled = 64    # Number of negative examples to sample.
 def matrix_distance(tensor1, tensor2):
   with tf.name_scope("matrix_distance"):
     sub = tf.sub(tensor1, tensor2)
-    distance = tf.sqrt(tf.reduce_sum(tf.pow(sub, 2), 1))
+    distance = tf.sqrt(tf.clip_by_value(tf.reduce_sum(tf.pow(sub, 2), 1), 1e-10, 1e+37))
     return distance
 
 def centroid(tensor):
@@ -260,10 +263,11 @@ with graph.as_default():
 
   # Recalculating centroids for words in a batch
   with tf.name_scope("category_distances"):
-    category_distances = matrix_distance(
-      tf.gather(embeddings, train_categories),
-      tf.gather(embeddings, train_category_indexes)
-    )
+    #category_distances = matrix_distance(
+    #  tf.gather(embeddings, train_categories),
+    #  tf.gather(embeddings, train_category_indexes)
+    #)
+    category_distances = tf.reduce_mean(tf.gather(embeddings, train_categories), 1)
 
   # Precomputed centroids for each embeddings vector
   # Initialize them with embeddings by default
@@ -306,7 +310,7 @@ with graph.as_default():
       valid_embeddings, normalized_embeddings, transpose_b=True)
 
 # Step 5: Begin training.
-num_steps = 100001
+num_steps = 1000001
 
 with tf.Session(graph=graph) as session:
   # merged = tf.merge_all_summaries()
@@ -317,7 +321,9 @@ with tf.Session(graph=graph) as session:
 
   average_loss = 0
   average_cat_per_page = 0
-  for step in xrange(num_steps):
+  last_average_loss = 241
+  step = 0
+  while last_average_loss > 10 and step < num_steps:
     batch_inputs, batch_labels = generate_batch(data_reader, dictionary, batch_size, num_skips, skip_window)
     categories = list()
     category_indexes = list()
@@ -326,9 +332,9 @@ with tf.Session(graph=graph) as session:
         for i in pages[input]:
           category_indexes.append(id)
           categories.append(i)
-      else:
-        category_indexes.append(id)
-        categories.append(input)
+    if len(categories) is 0:
+      categories.append(0)
+      category_indexes.append(1)
     average_cat_per_page += len(categories)
     feed_dict = {
       train_inputs: batch_inputs, train_labels: batch_labels,
@@ -354,11 +360,12 @@ with tf.Session(graph=graph) as session:
       # The average loss is an estimate of the loss over the last 2000 batches.
       print("Average loss at step ", step, ": ", average_loss)
       print("Average categories per batch:", average_cat_per_page)
+      last_average_loss = average_loss
       average_loss = 0
       average_cat_per_page = 0
 
     # Note that this is expensive (~20% slowdown if computed every 500 steps)
-    if step % 10000 == 0:
+    if step % 100000 == 0:
       sim = similarity.eval()
       for i in xrange(valid_size):
         valid_word = reverse_dictionary[valid_examples[i]]
@@ -369,6 +376,7 @@ with tf.Session(graph=graph) as session:
           close_word = reverse_dictionary[nearest[k]]
           log_str = "%s %s," % (log_str, close_word)
         print(log_str)
+    step += 1
   final_embeddings = normalized_embeddings.eval()
 
 # Step 6: Dump embeddings to file
@@ -379,7 +387,7 @@ with open('embeddings.tsv', 'wb') as csvfile:
     if id not in reverse_dictionary:
       print("Bullshit happened: ", id, embedding)
       continue
-    writer.writerow([reverse_dictionary[id].encode('utf8')]+[str(value) for value in embedding])
+    writer.writerow([reverse_dictionary[id]]+[str(value) for value in embedding])
 
 # Step 7: Visualize the embeddings.
 
