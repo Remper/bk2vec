@@ -59,16 +59,20 @@ def build_dictionary(reader):
 # Limiter if there are performance issues
 max_pages = 0
 max_categories_per_page = 0
+test_set = 0.1
 
 def build_pages(filename, dictionary):
-  global max_pages
+  global max_pages, max_categories_per_page, test_set
   pages = dict()
+  evaluation = dict()
   maxPagesTitle = "Unknown"
   maxPages = 0
   found = 0
   notfound = 0
   category_found = 0
   category_notfound = 0
+  test_set_size = 0
+  training_set_size = 0
   with gzip.open(filename, 'rb') as csvfile:
     reader = csv.reader(csvfile, delimiter='\t', quoting=csv.QUOTE_NONE, quotechar='')
     try:
@@ -87,22 +91,31 @@ def build_pages(filename, dictionary):
         page_index = dictionary[page_title]
         if page_index not in pages:
           pages[page_index] = list()
+        if page_index not in evaluation:
+          evaluation[page_index] = list()
         page_categories = pages[page_index]
+        evaluation_current = evaluation[page_index]
         for word in row[1:]:
           if word not in dictionary:
             category_notfound += 1
             continue
           category_found += 1
-          page_categories.append(dictionary[word])
+          if test_set > 0 and random.random() <= test_set:
+            test_set_size += 1
+            evaluation_current.append(dictionary[word])
+          else:
+            training_set_size += 1
+            page_categories.append(dictionary[word])
         if len(page_categories) > maxPages:
           maxPages = len(page_categories)
           maxPagesTitle = page_title
     except csv.Error:
       print(u"Dunno why this error happens")
   print(len(pages), "pages parsed.", "Page with most categories: ", maxPagesTitle, "with", maxPages, "categories")
+  print("Training set size:", training_set_size, "Test set size:", test_set_size)
   print("Pages found:", found, "Pages not found:", notfound)
   print("Categories found:", category_found, "Categories not found:", category_notfound)
-  return pages
+  return pages, evaluation
 
 
 def restore_dictionary(filename):
@@ -128,6 +141,11 @@ def store_dictionary(dictionary, filename):
     for value in dictionary.keys():
       writer.writerow([value, dictionary[value]])
 
+def dump_evaluation(evaluation, filename):
+  with open(filename + "_test", 'wb') as csvfile:
+    writer = csv.writer(csvfile, delimiter='\t', quoting=csv.QUOTE_NONE, quotechar='')
+    for value in evaluation.keys():
+      writer.writerow([value]+evaluation[value])
 
 if os.path.exists(TEXTS+"_dict"):
   print('Restoring dictionary')
@@ -140,7 +158,11 @@ else:
   print('Done')
 vocabulary_size = len(dictionary)
 print('Vocabulary size: ', vocabulary_size)
-pages = build_pages(CATEGORIES, dictionary)
+print('Building page -> category dictionary')
+pages, evaluation = build_pages(CATEGORIES, dictionary)
+print('Storing test set')
+dump_evaluation(evaluation, CATEGORIES)
+print('Done')
 
 def word_provider(filename):
   while True:
@@ -189,7 +211,7 @@ for i in range(8):
 # Step 4: Build and train a skip-gram model.
 
 batch_size = 128
-embedding_size = 80  # Dimension of the embedding vector.
+embedding_size = 90  # Dimension of the embedding vector.
 skip_window = 1       # How many words to consider left and right.
 num_skips = 2         # How many times to reuse an input to generate a label.
 
@@ -310,7 +332,7 @@ with graph.as_default():
       valid_embeddings, normalized_embeddings, transpose_b=True)
 
 # Step 5: Begin training.
-num_steps = 1000001
+num_steps = 10000001
 
 with tf.Session(graph=graph) as session:
   # merged = tf.merge_all_summaries()
