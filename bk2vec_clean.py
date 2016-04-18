@@ -16,7 +16,6 @@ import tensorflow as tf
 #CATEGORIES = '/Users/remper/Downloads/bk2vec_input/enwiki-20140203-page-category-out.csv.gz'
 # Borean
 TEXTS = '/borean1/data/pokedem-experiments/bk2vec/alessio/enwiki-20140203-text-cleaned.csv.gz'
-CATEGORIES = '/borean1/data/pokedem-experiments/bk2vec/alessio/enwiki-20140203-page-category-out.csv.gz'
 
 # Increasing limit for CSV parser
 csv.field_size_limit(2147483647)
@@ -158,11 +157,11 @@ else:
   print('Done')
 vocabulary_size = len(dictionary)
 print('Vocabulary size: ', vocabulary_size)
-print('Building page -> category dictionary')
-pages, evaluation = build_pages(CATEGORIES, dictionary)
-print('Storing test set')
-dump_evaluation(evaluation, CATEGORIES)
-print('Done')
+#print('Building page -> category dictionary')
+#pages, evaluation = build_pages(CATEGORIES, dictionary)
+#print('Storing test set')
+#dump_evaluation(evaluation, CATEGORIES)
+#print('Done')
 
 def word_provider(filename):
   while True:
@@ -240,8 +239,6 @@ with graph.as_default():
   # Input data.
   train_inputs = tf.placeholder(tf.int32, shape=[batch_size], name="train_inputs")
   train_labels = tf.placeholder(tf.int32, shape=[batch_size, 1], name="train_labels")
-  train_categories = tf.placeholder(tf.int32, shape=[None], name="train_categories")
-  train_category_indexes = tf.placeholder(tf.int32, shape=[None], name="train_category_indexes")
 
   valid_dataset = tf.constant(valid_examples, dtype=tf.int32)
 
@@ -258,30 +255,6 @@ with graph.as_default():
                             stddev=1.0 / math.sqrt(embedding_size)), name="NCE_weights")
     nce_biases = tf.Variable(tf.zeros([vocabulary_size]), name="NCE_biases")
 
-  # Recalculating centroids for words in a batch
-  with tf.name_scope("category_distances"):
-    #category_distances = matrix_distance(
-    #  tf.gather(embeddings, train_categories),
-    #  tf.gather(embeddings, train_category_indexes)
-    #)
-    category_distances = tf.reduce_mean(tf.gather(embeddings, train_categories), 1)
-
-  # Precomputed centroids for each embeddings vector
-  # Initialize them with embeddings by default
-  # category_centroids = tf.Variable(embeddings.initialized_value())
-
-  # Update centroids
-  # tf.scatter_update(category_centroids, train_inputs, recalculated_centroids)
-
-  # Resolving current centroid values
-  # current_batch_centroids = tf.nn.embedding_lookup(category_centroids, train_inputs)
-
-  # Categorical knowledge additional term
-  with tf.name_scope("category_loss"):
-    # Building category objective which is average distance to word centroid
-    category_loss = tf.reduce_mean(category_distances)
-    category_loss_summary = tf.scalar_summary("category_loss", category_loss)
-
   # Compute the average NCE loss for the batch.
   # tf.nce_loss automatically draws a new sample of the negative labels each
   # time we evaluate the loss.
@@ -292,7 +265,7 @@ with graph.as_default():
     )
     skipgram_loss_summary = tf.scalar_summary("skipgram_loss", loss)
 
-  joint_loss = tf.add(loss, category_loss, name="joint_loss")
+  joint_loss = loss
 
   # Construct the SGD optimizer using a learning rate of 1.0.
   loss_summary = tf.scalar_summary("joint_loss", joint_loss)
@@ -311,31 +284,18 @@ num_steps = 2000001
 
 with tf.Session(graph=graph) as session:
   # merged = tf.merge_all_summaries()
-  category_merged = tf.merge_summary([skipgram_loss_summary, loss_summary, category_loss_summary])
+  category_merged = tf.merge_summary([skipgram_loss_summary, loss_summary])
   writer = tf.train.SummaryWriter("logs", graph)
   tf.initialize_all_variables().run()
   print("Initialized")
 
   average_loss = 0
-  average_cat_per_page = 0
   last_average_loss = 241
   step = 0
   while last_average_loss > 10 and step < num_steps:
     batch_inputs, batch_labels = generate_batch(data_reader, dictionary, batch_size, num_skips, skip_window)
-    categories = list()
-    category_indexes = list()
-    for id, input in enumerate(batch_inputs):
-      if input in pages:
-        for i in pages[input]:
-          category_indexes.append(id)
-          categories.append(i)
-    if len(categories) is 0:
-      categories.append(0)
-      category_indexes.append(1)
-    average_cat_per_page += len(categories)
     feed_dict = {
-      train_inputs: batch_inputs, train_labels: batch_labels,
-      train_categories: categories, train_category_indexes: category_indexes
+      train_inputs: batch_inputs, train_labels: batch_labels
     }
 
     # We perform one update step by evaluating the optimizer op (including it
@@ -353,13 +313,10 @@ with tf.Session(graph=graph) as session:
     if step % 2000 == 0:
       if step > 0:
         average_loss /= 2000
-        average_cat_per_page /= 2000
       # The average loss is an estimate of the loss over the last 2000 batches.
       print("Average loss at step ", step, ": ", average_loss)
-      print("Average categories per batch:", average_cat_per_page)
       last_average_loss = average_loss
       average_loss = 0
-      average_cat_per_page = 0
 
     # Note that this is expensive (~20% slowdown if computed every 500 steps)
     if step % 100000 == 0:

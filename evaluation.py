@@ -2,61 +2,97 @@
 from __future__ import absolute_import
 from __future__ import print_function
 
-import zipfile
+import gzip
 import csv
 import tensorflow as tf
 
-def read_relations(filename):
-  f = zipfile.ZipFile(filename)
-  reverse_dict = {}
-  dict = {}
-  previous = []
-  for name in f.namelist():
-    for line in f.open(name, "r").readlines():
-      relation = line.strip().split("\t")
-      if len(relation) is not 2:
-        print("Inconsistency in relations file. Previous:", previous, "Current:", relation)
-        continue
-      previous = relation
-      relation[1] = relation[1].split("-")[0].lower()
-      if relation[1] is 'us':
-        relation[1] = 'united_states'
-      if relation[1] not in reverse_dict:
-        reverse_dict[relation[1]] = []
-      reverse_dict[relation[1]].append(relation[0])
-      dict[relation[0]] = relation[1]
-  return reverse_dict, dict
+#DICTIONARY = '/Users/remper/Projects/bk2vec/borean/embeddings_80_500k_traintest_dict.gz'
+#CATEGORIES = '/Users/remper/Projects/bk2vec/borean/embeddings_80_500k_traintest_test.gz'
+#EMBEDDINGS = '/Users/remper/Projects/bk2vec/borean/embeddings_80_500k_traintest.tsv.gz'
+# Borean
+#DICTIONARY = '/borean1/data/pokedem-experiments/bk2vec/alessio/enwiki-20140203-text-cleaned.csv.gz_dict'
+#CATEGORIES = '/borean1/data/pokedem-experiments/bk2vec/embeddings_80_500k_traintest_test.gz'
+#EMBEDDINGS = '/borean1/data/pokedem-experiments/bk2vec/embeddings_80_500k_traintest.tsv.gz'
+# Auster
+DICTIONARY = 'embeddings_80_500k_traintest_dict.gz'
+CATEGORIES = 'embeddings_80_500k_traintest_test.gz'
+EMBEDDINGS = 'embeddings_80_500k_traintest.tsv.gz'
 
-def read_embeddings(filename):
-  f = zipfile.ZipFile(filename)
+def restore_dictionary(filename):
   dictionary = dict()
+  reverse_dictionary = dict()
+  processed = 0
+  with gzip.open(filename, 'rb') as csvfile:
+    reader = csv.reader(csvfile, delimiter='\t', quoting=csv.QUOTE_NONE, quotechar='')
+    for row in reader:
+      row[0] = str(row[0])
+      row[1] = int(row[1])
+      processed += 1
+      if processed % 3000000 == 0:
+        print("  " + str(processed // 1000000) + "m words parsed")
+      dictionary[row[0]] = row[1]
+      reverse_dictionary[row[1]] = row[0]
+  return dictionary, reverse_dictionary
+
+
+def restore_evaluation(filename):
+  pages = dict()
+  categories = 0
+  with gzip.open(filename, 'rb') as csvfile:
+    reader = csv.reader(csvfile, delimiter='\t', quoting=csv.QUOTE_NONE, quotechar='')
+    for row in reader:
+      if row[0] not in pages:
+        pages[row[0]] = list()
+      categories = pages[row[0]]
+      categories.extend(row[1:])
+      categories += len(row[1:])
+  print("Loaded", len(pages.values()), "pages with", categories, "categories")
+  return pages
+
+
+def restore_embeddings(dictionary, filename):
   embeddings = list()
   embeddings_size = 0
-  for name in f.namelist():
-    with f.open(name, 'rU') as csvfile:
-      reader = csv.reader(csvfile, delimiter='\t')
-      try:
-        for row in reader:
-          if embeddings_size == 0:
-            embeddings_size = len(row) - 1
-          if row[0] in dictionary:
-            continue
-          dictionary[row[0]] = len(embeddings)
-          embedding = map(float, row[1:])
-          embeddings.append(embedding)
-          if len(embeddings) % 20000 == 0:
-            print("  " + str(len(embeddings) / 1000) + "k words parsed")
-      except csv.Error:
-        print(u"Dunno why this error happens")
-  return embeddings, dictionary, embeddings_size
+  embeddings_count = 0
+  with gzip.open(filename, 'rb') as csvfile:
+    reader = csv.reader(csvfile, delimiter='\t')
+    try:
+      for row in reader:
+        if embeddings_size == 0:
+          embeddings_size = len(row) - 1
+        if row[0] not in dictionary:
+          print("Word", row[0], "haven't been found in a dictionary")
+          continue
+        dict_index = dictionary[row[0]]
+        if dict_index != len(embeddings):
+          print("Inconsistency dictionary -> embeddings, pages might be off", dict_index, len(embeddings))
+          exit()
+        embeddings_count += 1
+        embedding = map(float, row[1:])
+        embeddings.append(embedding)
+        if embeddings_count % 1000000 == 0:
+          print("  "+str(embeddings_count // 1000000)+"m words parsed")
+    except csv.Error:
+      print(u"Dunno why this error happens")
+  return embeddings, embeddings_size
 
-embeddings, dictionary, embeddings_size = read_embeddings("/Users/remper/Google Drive/bk2vec/experiments/simple_relations/clean_embeddings.zip")
+
+print("Restoring dictionary")
+dictionary, reverse_dictionary = restore_dictionary(DICTIONARY)
+print("Dictionary restored")
+print("Restoring embeddings")
+embeddings, embeddings_size = restore_embeddings(dictionary, EMBEDDINGS)
+pages = restore_evaluation(CATEGORIES)
 print(len(embeddings), "loaded of", embeddings_size, "dimensions")
 print("Sample embedding: yaroslav", embeddings[dictionary['yaroslav']])
-relations, relations_dict = read_relations("/Users/remper/Google Drive/bk2vec/experiments/simple_relations/relations.zip")
-print(len(relations_dict),"loaded of", len(relations), "categories")
 
 graph = tf.Graph()
+
+def matrix_distance(tensor1, tensor2):
+  with tf.name_scope("matrix_distance"):
+    sub = tf.sub(tensor1, tensor2)
+    distance = tf.sqrt(tf.clip_by_value(tf.reduce_sum(tf.pow(sub, 2), 1), 1e-10, 1e+37))
+    return distance
 
 with graph.as_default():
   # Input
@@ -66,35 +102,21 @@ with graph.as_default():
 
   # Map relations
   categories_input = list()
-  missing_words = list()
-  for category in relations.keys():
-    category_list = list()
-    for word in relations[category]:
-      if word not in dictionary:
-        missing_words.append(word)
-        word = 'UNK'
-      category_list.append(dictionary[word])
-    category_tensor = tf.constant(category_list, name="category_input")
+  page_input = list()
+  for page in pages:
+    category_tensor = tf.constant(pages[page], name="page_input")
     categories_input.append(category_tensor)
-  print("Words missing in embeddings ("+str(len(missing_words))+"):",missing_words)
+    page_input.append(page)
 
   # Graph
-
-  # Look up embeddings for categories
-  categories = list()
-  for category in categories_input:
-    categories.append(tf.nn.embedding_lookup(embeddings_input, category, name="category_embedding"))
-
-  # Categorical knowledge additional term
-  with tf.name_scope("category_loss") as scope:
-    losses = list()
-    for category in categories:
-      centroid = tf.matmul(tf.ones_like(category), tf.diag(tf.reduce_mean(category, 0)), name="centroid")
-      losses.append(tf.reduce_mean(tf.sqrt(tf.reduce_sum(tf.pow(tf.sub(
-        category, centroid), 2), 1), name="category_sqrt"), name="mean_loss_in_category"))
-
-    # Building join objective, normalizing second objective by the amount of categories
-    category_loss = tf.add_n(losses)
+  categories_distance = list()
+  for id, categories in enumerate(categories_input):
+    resolved_categories = tf.gather(embeddings, categories)
+    categories_distance.append(tf.reduce_mean(matrix_distance(
+      resolved_categories,
+      tf.matmul(tf.ones_like(resolved_categories), tf.diag(tf.gather(embeddings, pages[id])))
+    )))
+  category_loss = tf.reduce_mean(tf.pack(categories_distance))
 
 with tf.Session(graph=graph) as session:
   # We must initialize all variables before we use them.
