@@ -57,7 +57,7 @@ def restore_embeddings(filename):
       del embeddings
     except csv.Error:
       print(u"Dunno why this error happens")
-  return final_embeddings, embeddings_size
+  return final_embeddings
 
 if not os.path.exists(CATEGORIES):
   print("Categories file doesn't exist: "+CATEGORIES)
@@ -68,7 +68,8 @@ if not os.path.exists(EMBEDDINGS):
 print("Restoring test set")
 pages = restore_evaluation(CATEGORIES)
 print("Restoring embeddings")
-embeddings, embeddings_size = restore_embeddings(EMBEDDINGS)
+embeddings = restore_embeddings(EMBEDDINGS)
+print("Restored embeddings with shape:", embeddings.shape)
 
 graph = tf.Graph()
 
@@ -83,29 +84,34 @@ with graph.as_default():
 
   # Look up embeddings for inputs.
   category_tensor = tf.placeholder(tf.float32, shape=[None, embeddings.shape[1]])
-  page_tensor = tf.placeholder(tf.float32, shape=[embeddings.shape[1]])
+  page_tensor = tf.placeholder(tf.float32, shape=[None, embeddings.shape[1]])
 
   category_loss = tf.reduce_mean(matrix_distance(
     category_tensor,
-    tf.matmul(tf.ones_like(category_tensor, dtype=tf.float32), tf.diag(page_tensor))
+    page_tensor
   ))
 
   # Graph
   loss = 0.0
   counts = 0
   print("Starting calculating pages loss")
-  page_proc = 0
+  indices = list()
+  page_indices = list()
   for page in pages.keys():
     if len(pages[page]) == 0:
       continue
-    page_proc += 1
-    if page_proc % 100000 == 0:
-      print("  " + str(page_proc // 100000) + "00k pages parsed")
-      print("  Avg loss:", loss/counts)
-    category_input = embeddings[np.array(pages[page])]
-    page_input = embeddings[page]
-    with tf.Session(graph=graph) as session:
-      loss += session.run(category_loss, feed_dict={category_tensor:category_input, page_tensor:page_input})
-      counts += 1
+    counts += 1
+    indices.extend(pages[page])
+    page_indices.extend([page] * len(pages[page]))
+    if counts % 50 == 0:
+      category_input = embeddings[np.array(indices)]
+      page_input = embeddings[np.array(page_indices)]
+      indices = list()
+      page_indices = list()
+      with tf.Session(graph=graph) as session:
+        loss += session.run(category_loss, feed_dict={category_tensor:category_input, page_tensor:page_input})
+    if counts % 10000 == 0:
+      print("  " + str(counts // 1000) + "k pages parsed")
+      print("  Avg loss:", loss / counts)
 
   print("Average loss: ", loss/counts)
