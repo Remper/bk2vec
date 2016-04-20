@@ -61,8 +61,10 @@ def restore_embeddings(filename):
 
 if not os.path.exists(CATEGORIES):
   print("Categories file doesn't exist: "+CATEGORIES)
+  exit()
 if not os.path.exists(EMBEDDINGS):
   print("Embeddings file doesn't exist: "+EMBEDDINGS)
+  exit()
 print("Restoring test set")
 pages = restore_evaluation(CATEGORIES)
 print("Restoring embeddings")
@@ -99,10 +101,9 @@ with graph.as_default():
     page_proc += 1
     if page_proc % 100000 == 0:
       print("  " + str(page_proc // 100000) + "00k pages parsed")
+      print("  Avg loss:", loss/counts)
     category_input = embeddings[np.array(pages[page])]
     page_input = embeddings[page]
-    print("  Categories shape", category_input.shape)
-    print("  Page shape", page_input.shape)
     with tf.Session(graph=graph) as session:
       loss += session.run(category_loss, feed_dict={category_tensor:category_input, page_tensor:page_input})
       counts += 1
