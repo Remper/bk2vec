@@ -103,15 +103,15 @@ with graph.as_default():
     counts += 1
     indices.extend(pages[page])
     page_indices.extend([page] * len(pages[page]))
-    if counts % 50 == 0:
+    if counts % 100 == 0:
       category_input = embeddings[np.array(indices)]
       page_input = embeddings[np.array(page_indices)]
       indices = list()
       page_indices = list()
       with tf.Session(graph=graph) as session:
         loss += session.run(category_loss, feed_dict={category_tensor:category_input, page_tensor:page_input})
-    if counts % 10000 == 0:
+    if counts % 1000000 == 0:
       print("  " + str(counts // 1000) + "k pages parsed")
-      print("  Avg loss:", loss / counts)
+      print("  Avg loss:", loss / (counts/100))
 
-  print("Average loss: ", loss/counts)
+  print("Average loss: ", loss / (counts/100))
