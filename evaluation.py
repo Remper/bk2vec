@@ -6,6 +6,7 @@ import gzip
 import csv
 import tensorflow as tf
 import numpy as np
+import os.path
 
 #CATEGORIES = '/Users/remper/Projects/bk2vec/borean/embeddings_80_500k_traintest_test.gz'
 #EMBEDDINGS = '/Users/remper/Projects/bk2vec/borean/embeddings_80_500k_traintest.tsv.gz'
@@ -58,10 +59,14 @@ def restore_embeddings(filename):
       print(u"Dunno why this error happens")
   return final_embeddings, embeddings_size
 
-print("Restoring embeddings")
-embeddings, embeddings_size = restore_embeddings(EMBEDDINGS)
+if not os.path.exists(CATEGORIES):
+  print("Categories file doesn't exist: "+CATEGORIES)
+if not os.path.exists(EMBEDDINGS):
+  print("Embeddings file doesn't exist: "+EMBEDDINGS)
 print("Restoring test set")
 pages = restore_evaluation(CATEGORIES)
+print("Restoring embeddings")
+embeddings, embeddings_size = restore_embeddings(EMBEDDINGS)
 
 graph = tf.Graph()
 
@@ -75,26 +80,31 @@ with graph.as_default():
   # Input
 
   # Look up embeddings for inputs.
-  embeddings_input = tf.placeholder(tf.float32, shape=embeddings.shape, name="embeddings")
+  category_tensor = tf.placeholder(tf.float32, shape=[None, embeddings.shape[1]])
+  page_tensor = tf.placeholder(tf.float32, shape=[embeddings.shape[1]])
+
+  category_loss = tf.reduce_mean(matrix_distance(
+    category_tensor,
+    tf.matmul(tf.ones_like(category_tensor, dtype=tf.float32), tf.diag(page_tensor))
+  ))
 
   # Graph
   loss = 0.0
   counts = 0
   print("Starting calculating pages loss")
   page_proc = 0
-  for page in pages:
+  for page in pages.keys():
     if len(pages[page]) == 0:
       continue
     page_proc += 1
     if page_proc % 100000 == 0:
       print("  " + str(page_proc // 100000) + "00k pages parsed")
-    category_tensor = tf.gather(embeddings_input, tf.constant(pages[page], name="page_input"))
-    category_loss = tf.reduce_mean(matrix_distance(
-      category_tensor,
-      tf.matmul(tf.ones_like(category_tensor, dtype=tf.float32), tf.diag(tf.gather(embeddings_input, tf.constant(page, dtype=tf.int32))))
-    ))
+    category_input = embeddings[np.array(pages[page])]
+    page_input = embeddings[page]
+    print("  Categories shape", category_input.shape)
+    print("  Page shape", page_input.shape)
     with tf.Session(graph=graph) as session:
-      loss += session.run(category_loss, feed_dict={embeddings_input:embeddings})
+      loss += session.run(category_loss, feed_dict={category_tensor:category_input, page_tensor:page_input})
       counts += 1
 
   print("Average loss: ", loss/counts)
