@@ -6,6 +6,7 @@ import gzip
 import csv
 import tensorflow as tf
 import numpy as np
+import os.path
 
 #CATEGORIES = '/Users/remper/Projects/bk2vec/borean/embeddings_80_500k_traintest_test.gz'
 #EMBEDDINGS = '/Users/remper/Projects/bk2vec/borean/embeddings_80_500k_traintest.tsv.gz'
@@ -22,6 +23,8 @@ def restore_evaluation(filename):
   with gzip.open(filename, 'rb') as csvfile:
     reader = csv.reader(csvfile, delimiter='\t', quoting=csv.QUOTE_NONE, quotechar='')
     for row in reader:
+      if len(row) == 0:
+        continue
       index = int(row[0])
       pages[index] = np.array(map(int, row[1:]))
       categories += len(pages[index])
@@ -31,6 +34,7 @@ def restore_evaluation(filename):
 
 def restore_embeddings(filename):
   embeddings = list()
+  final_embeddings = list()
   embeddings_size = 0
   embeddings_count = 0
   with gzip.open(filename, 'rb') as csvfile:
@@ -42,16 +46,30 @@ def restore_embeddings(filename):
         embeddings_count += 1
         embedding = np.array(map(float, row[1:]))
         embeddings.append(embedding)
-        if embeddings_count % 1000000 == 0:
+        if embeddings_count % 2000000 == 0:
           print("  "+str(embeddings_count // 1000000)+"m words parsed")
+          final_embeddings.append(np.array(embeddings))
+          del embeddings
+          embeddings = list()
+          print("  Squashed")
+      final_embeddings.append(np.array(embeddings))
+      final_embeddings = np.vstack(final_embeddings)
+      del embeddings
     except csv.Error:
       print(u"Dunno why this error happens")
-  return embeddings, embeddings_size
+  return final_embeddings
 
-print("Restoring embeddings")
-embeddings, embeddings_size = restore_embeddings(EMBEDDINGS)
+if not os.path.exists(CATEGORIES):
+  print("Categories file doesn't exist: "+CATEGORIES)
+  exit()
+if not os.path.exists(EMBEDDINGS):
+  print("Embeddings file doesn't exist: "+EMBEDDINGS)
+  exit()
+print("Restoring test set")
 pages = restore_evaluation(CATEGORIES)
-print(len(embeddings), "loaded of", embeddings_size, "dimensions")
+print("Restoring embeddings")
+embeddings = restore_embeddings(EMBEDDINGS)
+print("Restored embeddings with shape:", embeddings.shape)
 
 graph = tf.Graph()
 
@@ -65,30 +83,35 @@ with graph.as_default():
   # Input
 
   # Look up embeddings for inputs.
-  embeddings_input = tf.constant(embeddings)
+  category_tensor = tf.placeholder(tf.float32, shape=[None, embeddings.shape[1]])
+  page_tensor = tf.placeholder(tf.float32, shape=[None, embeddings.shape[1]])
 
-  # Map relations
-  categories_input = list()
-  page_input = list()
-  for page in pages:
-    category_tensor = tf.constant(pages[page], name="page_input")
-    categories_input.append(category_tensor)
-    page_input.append(page)
+  category_loss = tf.reduce_mean(matrix_distance(
+    category_tensor,
+    page_tensor
+  ))
 
   # Graph
-  categories_distance = list()
-  for id, categories in enumerate(categories_input):
-    resolved_categories = tf.gather(embeddings, categories)
-    categories_distance.append(tf.reduce_mean(matrix_distance(
-      resolved_categories,
-      tf.matmul(tf.ones_like(resolved_categories), tf.diag(tf.gather(embeddings, pages[id])))
-    )))
-  category_loss = tf.reduce_mean(tf.pack(categories_distance))
+  loss = 0.0
+  counts = 0
+  print("Starting calculating pages loss")
+  indices = list()
+  page_indices = list()
+  for page in pages.keys():
+    if len(pages[page]) == 0:
+      continue
+    counts += 1
+    indices.extend(pages[page])
+    page_indices.extend([page] * len(pages[page]))
+    if counts % 100 == 0:
+      category_input = embeddings[np.array(indices)]
+      page_input = embeddings[np.array(page_indices)]
+      indices = list()
+      page_indices = list()
+      with tf.Session(graph=graph) as session:
+        loss += session.run(category_loss, feed_dict={category_tensor:category_input, page_tensor:page_input})
+    if counts % 1000000 == 0:
+      print("  " + str(counts // 1000) + "k pages parsed")
+      print("  Avg loss:", loss / (counts/100))
 
-with tf.Session(graph=graph) as session:
-  # We must initialize all variables before we use them.
-  tf.initialize_all_variables().run()
-  print("Initialized")
-
-  loss = session.run(category_loss, feed_dict=dict())
-  print("Average loss: ", loss)
+  print("Average loss: ", loss / (counts/100))

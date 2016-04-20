@@ -12,11 +12,11 @@ import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 
-#TEXTS = '/Users/remper/Downloads/bk2vec_input/enwiki-20140203-text-cleaned.csv.gz'
-#CATEGORIES = '/Users/remper/Downloads/bk2vec_input/enwiki-20140203-page-category-out.csv.gz'
+TEXTS = '/Users/remper/Downloads/bk2vec_input/enwiki-20140203-text-cleaned.csv.gz'
+CATEGORIES = '/Users/remper/Downloads/bk2vec_input/enwiki-20140203-page-category-out.csv.gz'
 # Borean
-TEXTS = '/borean1/data/pokedem-experiments/bk2vec/alessio/enwiki-20140203-text-cleaned.csv.gz'
-CATEGORIES = '/borean1/data/pokedem-experiments/bk2vec/alessio/enwiki-20140203-page-category-out.csv.gz'
+#TEXTS = '/borean1/data/pokedem-experiments/bk2vec/alessio/enwiki-20140203-text-cleaned.csv.gz'
+#CATEGORIES = '/borean1/data/pokedem-experiments/bk2vec/alessio/enwiki-20140203-page-category-out.csv.gz'
 
 # Increasing limit for CSV parser
 csv.field_size_limit(2147483647)
@@ -61,7 +61,7 @@ max_pages = 0
 max_categories_per_page = 0
 test_set = 0.1
 
-def build_pages(filename, dictionary):
+def build_pages(filename, dictionary, reverse_dictionary):
   global max_pages, max_categories_per_page, test_set
   pages = dict()
   evaluation = dict()
@@ -97,9 +97,11 @@ def build_pages(filename, dictionary):
         evaluation_current = evaluation[page_index]
         for word in row[1:]:
           if word not in dictionary:
+            dictionary[word] = len(dictionary)
+            reverse_dictionary[dictionary[word]] = word
             category_notfound += 1
-            continue
-          category_found += 1
+          else:
+            category_found += 1
           if test_set > 0 and random.random() <= test_set:
             test_set_size += 1
             evaluation_current.append(dictionary[word])
@@ -114,7 +116,7 @@ def build_pages(filename, dictionary):
   print(len(pages), "pages parsed.", "Page with most categories: ", maxPagesTitle, "with", maxPages, "categories")
   print("Training set size:", training_set_size, "Test set size:", test_set_size)
   print("Pages found:", found, "Pages not found:", notfound)
-  print("Categories found:", category_found, "Categories not found:", category_notfound)
+  print("Categories found:", category_found, "Added categories as new tokens:", category_notfound)
   return pages, evaluation
 
 
@@ -159,7 +161,8 @@ else:
 vocabulary_size = len(dictionary)
 print('Vocabulary size: ', vocabulary_size)
 print('Building page -> category dictionary')
-pages, evaluation = build_pages(CATEGORIES, dictionary)
+pages, evaluation = build_pages(CATEGORIES, dictionary, reverse_dictionary)
+vocabulary_size = len(dictionary)
 print('Storing test set')
 dump_evaluation(evaluation, CATEGORIES)
 print('Done')
