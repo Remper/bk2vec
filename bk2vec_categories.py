@@ -18,6 +18,19 @@ import tensorflow as tf
 TEXTS = '/borean1/data/pokedem-experiments/bk2vec/alessio/enwiki-20140203-text-cleaned.csv.gz'
 CATEGORIES = '/borean1/data/pokedem-experiments/bk2vec/alessio/enwiki-20140203-page-category-out.csv.gz'
 
+# Training parameters
+num_steps = 2000001  # Amount of steps
+batch_size = 128     # Size of the batch for every iteration
+embedding_size = 90  # Dimension of the embedding vector.
+skip_window = 1      # How many words to consider left and right.
+num_skips = 2        # How many times to reuse an input to generate a label..
+num_sampled = 64     # Number of negative examples to sample.
+
+# Page builder parameters
+max_pages = 0
+max_categories_per_page = 0
+test_set = 0.1
+
 # Increasing limit for CSV parser
 csv.field_size_limit(2147483647)
 
@@ -56,12 +69,8 @@ def build_dictionary(reader):
   print("Parsing finished")
   return dictionary, reverse_dictionary
 
-# Limiter if there are performance issues
-max_pages = 0
-max_categories_per_page = 0
-test_set = 0.1
 
-def build_pages(filename, dictionary):
+def build_pages(filename, dictionary, reverse_dictionary):
   global max_pages, max_categories_per_page, test_set
   pages = dict()
   evaluation = dict()
@@ -96,7 +105,10 @@ def build_pages(filename, dictionary):
         page_categories = pages[page_index]
         evaluation_current = evaluation[page_index]
         for word in row[1:]:
+          word = word+"_cat"
           if word not in dictionary:
+            dictionary[word] = len(dictionary)
+            reverse_dictionary[dictionary[word]] = word
             category_notfound += 1
             continue
           category_found += 1
@@ -142,10 +154,26 @@ def store_dictionary(dictionary, filename):
       writer.writerow([value, dictionary[value]])
 
 def dump_evaluation(evaluation, filename):
-  with open(filename + "_test", 'wb') as csvfile:
+  with open(filename, 'wb') as csvfile:
     writer = csv.writer(csvfile, delimiter='\t', quoting=csv.QUOTE_NONE, quotechar='')
     for value in evaluation.keys():
       writer.writerow([value]+evaluation[value])
+
+def dump_embeddings(embeddings):
+  with open('embeddings-' + str(embedding_size) + '-' + get_num_stems_str(num_steps) + '.tsv', 'wb') as csvfile:
+    writer = csv.writer(csvfile, delimiter='\t', quoting=csv.QUOTE_NONNUMERIC)
+    for id, embedding in enumerate(embeddings):
+      if id not in reverse_dictionary:
+        print("Bullshit happened: ", id, embedding)
+        continue
+      writer.writerow([reverse_dictionary[id]] + [str(value) for value in embedding])
+
+def get_num_stems_str(num_steps):
+  if num_steps > 1000000:
+    return str(num_steps // 1000000) + 'm'
+  if num_steps > 1000:
+    return str(num_steps // 1000) + 'k'
+  return str(num_steps)
 
 if os.path.exists(TEXTS+"_dict"):
   print('Restoring dictionary')
@@ -156,12 +184,13 @@ else:
   print('Storing dictionary')
   store_dictionary(dictionary, TEXTS)
   print('Done')
+print('Building page -> category dictionary')
+pages, evaluation = build_pages(CATEGORIES, dictionary, reverse_dictionary)
 vocabulary_size = len(dictionary)
 print('Vocabulary size: ', vocabulary_size)
-print('Building page -> category dictionary')
-pages, evaluation = build_pages(CATEGORIES, dictionary)
-print('Storing test set')
-dump_evaluation(evaluation, CATEGORIES)
+print('Storing test and training set')
+dump_evaluation(evaluation, "categories_test.tsv")
+dump_evaluation(pages, "categories_train.tsv")
 print('Done')
 
 def word_provider(filename):
@@ -208,20 +237,8 @@ batch, labels = generate_batch(data_reader, dictionary, batch_size=8, num_skips=
 for i in range(8):
   print(batch[i], '->', labels[i, 0])
   print(reverse_dictionary[batch[i]], '->', reverse_dictionary[labels[i, 0]])
+
 # Step 4: Build and train a skip-gram model.
-
-batch_size = 128
-embedding_size = 90  # Dimension of the embedding vector.
-skip_window = 1       # How many words to consider left and right.
-num_skips = 2         # How many times to reuse an input to generate a label.
-
-# We pick a random validation set to sample nearest neighbors. Here we limit the
-# validation samples to the words that have a low numeric ID, which by
-# construction are also the most frequent.
-valid_size = 8     # Random set of words to evaluate similarity on.
-valid_window = 100  # Only pick dev samples in the head of the distribution.
-valid_examples = np.array(random.sample([x for x in range(valid_window)], valid_size))
-num_sampled = 64    # Number of negative examples to sample.
 
 def matrix_distance(tensor1, tensor2):
   with tf.name_scope("matrix_distance"):
@@ -242,8 +259,6 @@ with graph.as_default():
   train_labels = tf.placeholder(tf.int32, shape=[batch_size, 1], name="train_labels")
   train_categories = tf.placeholder(tf.int32, shape=[None], name="train_categories")
   train_category_indexes = tf.placeholder(tf.int32, shape=[None], name="train_category_indexes")
-
-  valid_dataset = tf.constant(valid_examples, dtype=tf.int32)
 
   # Ops and variables pinned to the CPU because of missing GPU implementation
   with tf.device('/cpu:0'):
@@ -285,10 +300,10 @@ with graph.as_default():
   # tf.nce_loss automatically draws a new sample of the negative labels each
   # time we evaluate the loss.
   with tf.name_scope("skipgram_loss"):
-    loss = tf.reduce_mean(
+    loss = tf.mul(tf.constant(0.05), tf.reduce_mean(
       tf.nn.nce_loss(nce_weights, nce_biases, embed, train_labels, num_sampled, vocabulary_size)
       , name="skipgram_loss"
-    )
+    ))
     skipgram_loss_summary = tf.scalar_summary("skipgram_loss", loss)
 
   joint_loss = tf.add(loss, category_loss, name="joint_loss")
@@ -297,17 +312,11 @@ with graph.as_default():
   loss_summary = tf.scalar_summary("joint_loss", joint_loss)
   optimizer = tf.train.GradientDescentOptimizer(1.0, name="joint_objective").minimize(joint_loss)
 
-  # Compute the cosine similarity between minibatch examples and all embeddings.
+  # Normalize final embeddings
   norm = tf.sqrt(tf.reduce_sum(tf.square(embeddings), 1, keep_dims=True))
   normalized_embeddings = embeddings / norm
-  valid_embeddings = tf.nn.embedding_lookup(
-      normalized_embeddings, valid_dataset)
-  similarity = tf.matmul(
-      valid_embeddings, normalized_embeddings, transpose_b=True)
 
 # Step 5: Begin training.
-num_steps = 2000001
-
 with tf.Session(graph=graph) as session:
   # merged = tf.merge_all_summaries()
   category_merged = tf.merge_summary([skipgram_loss_summary, loss_summary, category_loss_summary])
@@ -345,10 +354,6 @@ with tf.Session(graph=graph) as session:
 
     average_loss += loss_val
 
-    #Calculate category loss once in a while
-    #if step % 2000 == 0:
-    #  writer.add_summary(session.run(category_loss_summary, feed_dict=feed_dict), step)
-
     if step % 2000 == 0:
       if step > 0:
         average_loss /= 2000
@@ -378,14 +383,7 @@ with tf.Session(graph=graph) as session:
   print("Done")
 
 # Step 6: Dump embeddings to file
-
-with open('embeddings.tsv', 'wb') as csvfile:
-  writer = csv.writer(csvfile, delimiter='\t', quoting=csv.QUOTE_NONNUMERIC)
-  for id, embedding in enumerate(final_embeddings):
-    if id not in reverse_dictionary:
-      print("Bullshit happened: ", id, embedding)
-      continue
-    writer.writerow([reverse_dictionary[id]]+[str(value) for value in embedding])
+dump_embeddings(final_embeddings)
 
 # Step 7: Visualize the embeddings.
 
