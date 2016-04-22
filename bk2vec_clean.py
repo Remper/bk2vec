@@ -30,7 +30,7 @@ parser.add_argument('--embedding_size', default=DEFAULT_EMBEDDING_SIZE, help='Em
 #                    const=sum, default=max,
 #                    help='sum the integers (default: find the max)')
 
-args = parser.parse_args(['-h'])
+args = parser.parse_args()
 # print(args)
 
 num_steps = args.iterations
