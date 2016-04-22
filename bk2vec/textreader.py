@@ -116,6 +116,10 @@ class Dictionary():
       word = self.unknown
     return self.dict[word]
 
+# Page builder parameters
+max_pages = 0
+max_categories_per_page = 0
+test_set = 0.1
 
 def build_pages(filename, dictionary, reverse_dictionary):
   print('Building page -> category dictionary')

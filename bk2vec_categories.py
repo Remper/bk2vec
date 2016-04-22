@@ -18,12 +18,6 @@ TEXTS = '/borean1/data/pokedem-experiments/bk2vec/alessio/enwiki-20140203-text-c
 CATEGORIES = '/borean1/data/pokedem-experiments/bk2vec/alessio/enwiki-20140203-page-category-out.csv.gz'
 
 args = Arguments().show_args().args
-
-# Page builder parameters
-max_pages = 0
-max_categories_per_page = 0
-test_set = 0.1
-
 text_reader = TextReader(TEXTS)
 
 
@@ -83,18 +77,18 @@ def generate_batch(reader, dictionary, batch_size, num_skips, skip_window):
       while target in targets_to_avoid:
         target = random.randint(0, span - 1)
       targets_to_avoid.append(target)
-      if buffer[skip_window] not in dictionary:
-        print("Word", buffer[skip_window], "is not in dictionary")
-        print(buffer)
-        print(dictionary[56])
-        exit()
-      if buffer[target] not in dictionary:
-        print("Word", buffer[target], "is not in dictionary")
-        print(dictionary[56])
-        print(buffer)
-        exit()
-      batch[i * num_skips + j] = dictionary[buffer[skip_window]]
-      labels[i * num_skips + j, 0] = dictionary[buffer[target]]
+      input = buffer[skip_window]
+      label = buffer[target]
+      try:
+        input = dictionary.dict[input]
+      except:
+        input = 0
+      try:
+        label = dictionary.dict[label]
+      except:
+        label = 0
+      batch[i * num_skips + j] = input
+      labels[i * num_skips + j, 0] = label
     buffer.append(reader.next())
   return batch, labels
 
