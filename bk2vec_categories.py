@@ -140,6 +140,11 @@ with graph.as_default():
       tf.gather(embeddings, train_categories),
       tf.gather(embeddings, train_category_indexes)
     )
+    category_distances = tf.maximum(
+      tf.sub(category_distances, tf.constant(1.0)),
+      tf.zeros_like(category_distances)
+    )
+
 
   # Precomputed centroids for each embeddings vector
   # Initialize them with embeddings by default
@@ -155,16 +160,18 @@ with graph.as_default():
   with tf.name_scope("category_loss"):
     # Building category objective which is average distance to word centroid
     category_loss = tf.reduce_mean(category_distances)
+    category_loss = tf.mul(tf.constant(10.0), category_loss, name="category_contrib_coeff")
     category_loss_summary = tf.scalar_summary("category_loss", category_loss)
 
   # Compute the average NCE loss for the batch.
   # tf.nce_loss automatically draws a new sample of the negative labels each
   # time we evaluate the loss.
   with tf.name_scope("skipgram_loss"):
-    loss = tf.mul(tf.constant(0.05), tf.reduce_mean(
+    loss = tf.reduce_mean(
       tf.nn.nce_loss(nce_weights, nce_biases, embed, train_labels, args.num_sampled, vocabulary_size)
       , name="skipgram_loss"
-    ))
+    )
+    loss = tf.mul(tf.constant(0.1), loss, name="skipgram_contrib_coeff")
     skipgram_loss_summary = tf.scalar_summary("skipgram_loss", loss)
 
   joint_loss = tf.add(loss, category_loss, name="joint_loss")
