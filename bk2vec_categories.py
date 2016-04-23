@@ -51,13 +51,16 @@ def get_num_stems_str(num_steps):
     return "{:.1f}".format(float(num_steps) / divider)+letter
 
 dictionary = text_reader.load_dictionary()
-pages, evaluation = build_pages(CATEGORIES, dictionary.dict, dictionary.rev_dict)
+if not args.clean:
+  pages, evaluation = build_pages(CATEGORIES, dictionary.dict, dictionary.rev_dict)
+  print('Storing test and training set')
+  dump_evaluation(evaluation, "categories_test.tsv")
+  dump_evaluation(pages, "categories_train.tsv")
+  print('Done')
+else:
+  print('Ignoring categories file: clean embeddings requested')
 vocabulary_size = len(dictionary)
 print('Vocabulary size: ', vocabulary_size)
-print('Storing test and training set')
-dump_evaluation(evaluation, "categories_test.tsv")
-dump_evaluation(pages, "categories_train.tsv")
-print('Done')
 
 
 # Step 3: Function to generate a training batch for the skip-gram model.
@@ -134,35 +137,6 @@ with graph.as_default():
                             stddev=1.0 / math.sqrt(args.embedding_size)), name="NCE_weights")
     nce_biases = tf.Variable(tf.zeros([vocabulary_size]), name="NCE_biases")
 
-  # Recalculating centroids for words in a batch
-  with tf.name_scope("category_distances"):
-    category_distances = matrix_distance(
-      tf.gather(embeddings, train_categories),
-      tf.gather(embeddings, train_category_indexes)
-    )
-    category_distances = tf.maximum(
-      tf.sub(category_distances, tf.constant(1.0)),
-      tf.zeros_like(category_distances)
-    )
-
-
-  # Precomputed centroids for each embeddings vector
-  # Initialize them with embeddings by default
-  # category_centroids = tf.Variable(embeddings.initialized_value())
-
-  # Update centroids
-  # tf.scatter_update(category_centroids, train_inputs, recalculated_centroids)
-
-  # Resolving current centroid values
-  # current_batch_centroids = tf.nn.embedding_lookup(category_centroids, train_inputs)
-
-  # Categorical knowledge additional term
-  with tf.name_scope("category_loss"):
-    # Building category objective which is average distance to word centroid
-    category_loss = tf.reduce_mean(category_distances)
-    category_loss = tf.mul(tf.constant(10.0), category_loss, name="category_contrib_coeff")
-    category_loss_summary = tf.scalar_summary("category_loss", category_loss)
-
   # Compute the average NCE loss for the batch.
   # tf.nce_loss automatically draws a new sample of the negative labels each
   # time we evaluate the loss.
@@ -174,7 +148,28 @@ with graph.as_default():
     loss = tf.mul(tf.constant(0.1), loss, name="skipgram_contrib_coeff")
     skipgram_loss_summary = tf.scalar_summary("skipgram_loss", loss)
 
-  joint_loss = tf.add(loss, category_loss, name="joint_loss")
+  joint_loss = loss
+
+  if not args.clean:
+    # Recalculating centroids for words in a batch
+    with tf.name_scope("category_distances"):
+      category_distances = matrix_distance(
+        tf.gather(embeddings, train_categories),
+        tf.gather(embeddings, train_category_indexes)
+      )
+      category_distances = tf.maximum(
+        tf.sub(category_distances, tf.constant(1.5)),
+        tf.zeros_like(category_distances)
+      )
+
+    # Categorical knowledge additional term
+    with tf.name_scope("category_loss"):
+      # Building category objective which is average distance to word centroid
+      category_loss = tf.reduce_mean(category_distances)
+      category_loss = tf.mul(tf.constant(10.0), category_loss, name="category_contrib_coeff")
+      category_loss_summary = tf.scalar_summary("category_loss", category_loss)
+
+    joint_loss = tf.add(loss, category_loss, name="joint_loss")
 
   # Construct the SGD optimizer using a learning rate of 1.0.
   loss_summary = tf.scalar_summary("joint_loss", joint_loss)
@@ -186,8 +181,7 @@ with graph.as_default():
 
 # Step 5: Begin training.
 with tf.Session(graph=graph) as session:
-  # merged = tf.merge_all_summaries()
-  category_merged = tf.merge_summary([skipgram_loss_summary, loss_summary, category_loss_summary])
+  merged = tf.merge_all_summaries()
   writer = tf.train.SummaryWriter("logs", graph)
   tf.initialize_all_variables().run()
   print("Initialized")
@@ -200,14 +194,15 @@ with tf.Session(graph=graph) as session:
     batch_inputs, batch_labels = generate_batch(data_reader, dictionary, args.batch_size, args.num_skips, args.window_size)
     categories = list()
     category_indexes = list()
-    for id, input in enumerate(batch_inputs):
-      if input in pages:
-        for i in pages[input]:
-          category_indexes.append(id)
-          categories.append(i)
+    if not args.clean:
+      for id, input in enumerate(batch_inputs):
+        if input in pages:
+          for i in pages[input]:
+            category_indexes.append(id)
+            categories.append(i)
     if len(categories) is 0:
       categories.append(0)
-      category_indexes.append(1)
+      category_indexes.append(0)
     average_cat_per_page += len(categories)
     feed_dict = {
       train_inputs: batch_inputs, train_labels: batch_labels,
@@ -217,7 +212,7 @@ with tf.Session(graph=graph) as session:
     # We perform one update step by evaluating the optimizer op (including it
     # in the list of returned values for session.run()
 
-    summary, _, loss_val = session.run([category_merged, optimizer, joint_loss], feed_dict=feed_dict)
+    summary, _, loss_val = session.run([merged, optimizer, joint_loss], feed_dict=feed_dict)
     writer.add_summary(summary, step)
 
     average_loss += loss_val

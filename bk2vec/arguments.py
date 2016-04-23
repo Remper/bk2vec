@@ -27,7 +27,15 @@ class Arguments():
                         help='Num skips (default {0})'.format(Arguments.DEFAULT_NUM_SKIPS), metavar='#')
     parser.add_argument('--num_sampled', default=Arguments.DEFAULT_NUM_SAMPLED,
                         help='Num sampled (default {0})'.format(Arguments.DEFAULT_NUM_SAMPLED), metavar='#')
+    parser.add_argument('--clean', default=False, action='store_true', help='Calculate only plain skipgram objective')
     self.args = parser.parse_args()
+    self.args.batch_size = int(self.args.batch_size)
+    self.args.iterations = int(self.args.iterations)
+    self.args.embedding_size = int(self.args.embedding_size)
+    self.args.num_skips = int(self.args.num_skips)
+    self.args.num_sampled = int(self.args.num_sampled)
+    self.args.window_size = int(self.args.window_size)
+    self.args.clean = bool(self.args.clean)
 
   def show_args(self):
     print("Initialized with settings:")
