@@ -1,0 +1,7 @@
+package bk2vec;
+
+message Embedding {
+    required int32 id = 1;
+    required string word = 2;
+    repeated double embedding = 3;
+}
