@@ -163,7 +163,7 @@ for i in range(8):
 def matrix_distance(tensor1, tensor2):
     with tf.name_scope("matrix_distance"):
         sub = tf.sub(tensor1, tensor2)
-        distance = tf.sqrt(tf.clip_by_value(tf.reduce_sum(tf.pow(sub, 2), 1), 1e-10, 1.0))
+        distance = tf.sqrt(tf.clip_by_value(tf.reduce_sum(tf.pow(sub, 2), 1), 1e-10, 1e+37))
         return distance
 
 
@@ -216,11 +216,12 @@ with graph.as_default():
                 tf.gather(embeddings.tensor(), train_category_indexes)
             )
             # Margin (we don't want categories to be squashed into the single dot)
-            if not args.no_margin:
-                category_distances = tf.maximum(
-                    tf.sub(category_distances, tf.constant(0.5)),
-                    tf.zeros_like(category_distances)
-                )
+            if args.margin > 0:
+                with tf.name_scope("margin_cutoff"):
+                    category_distances = tf.maximum(
+                        tf.sub(category_distances, tf.constant(args.margin, dtype=tf.float32)),
+                        tf.zeros_like(category_distances)
+                    )
 
         # Categorical knowledge additional term
         with tf.name_scope("category_loss"):

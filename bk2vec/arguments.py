@@ -11,6 +11,7 @@ class Arguments():
     DEFAULT_WINDOW_SIZE = 2  # Default size of the context
     DEFAULT_NUM_SKIPS = 2  # How many times to reuse an input to generate a label..
     DEFAULT_NUM_SAMPLED = 64  # Number of negative examples to sample.
+    DEFAULT_MARGIN = 1.0 # Default margin for the category objective
 
     def __init__(self):
         parser = argparse.ArgumentParser(description='Train Word2Vec.')
@@ -27,13 +28,13 @@ class Arguments():
                             help='Num skips (default {0})'.format(Arguments.DEFAULT_NUM_SKIPS), metavar='#')
         parser.add_argument('--num_sampled', default=Arguments.DEFAULT_NUM_SAMPLED,
                             help='Num sampled (default {0})'.format(Arguments.DEFAULT_NUM_SAMPLED), metavar='#')
+        parser.add_argument('--margin', default=Arguments.DEFAULT_MARGIN, metavar='#',
+                            help='Margin for category objective (default {0})'.format(Arguments.DEFAULT_MARGIN))
         parser.add_argument('--output', default='', help='Output dir (default - current dir)', metavar='#')
         parser.add_argument('--clean', default=False, action='store_true',
                             help='Calculate only plain skipgram objective')
         parser.add_argument('--detached', default=False, action='store_true',
                             help="Calculate category objective independently of the main one (select it's own samples)")
-        parser.add_argument('--no-margin', default=False, action='store_true',
-                            help="Disable margin from category objective")
         self.args = parser.parse_args()
         self.args.batch_size = int(self.args.batch_size)
         self.args.iterations = int(self.args.iterations)
@@ -41,9 +42,9 @@ class Arguments():
         self.args.num_skips = int(self.args.num_skips)
         self.args.num_sampled = int(self.args.num_sampled)
         self.args.window_size = int(self.args.window_size)
+        self.args.margin = float(self.args.margin)
         self.args.clean = bool(self.args.clean)
         self.args.detached = bool(self.args.detached)
-        self.args.no_margin = bool(self.args.no_margin)
         if self.args.output != '' and not self.args.output.endswith('/'):
             self.args.output += '/'
 
