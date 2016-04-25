@@ -124,6 +124,7 @@ def generate_batch(reader, dictionary, batch_size, num_skips, skip_window):
 class Pages:
     def __init__(self, pages):
         self._pages = pages
+        self._generator = self._get_next_page()
 
     def _get_next_page(self):
         while True:
@@ -134,16 +135,16 @@ class Pages:
         batch_indexes = list()
         batch = list()
         while len(batch_indexes) < batch_size:
-            page = self._get_next_page()
+            page = self._generator.next()
             for ele in self._pages[page]:
                 batch_indexes.append(page)
                 batch.append(ele)
         return batch_indexes, batch
 
-    def generate_batch(self, input_batch):
+    def generate_batch(self, input_batch, target_batch):
         batch_indexes = list()
         batch = list()
-        for page in input_batch:
+        for page in input_batch+target_batch.flatten():
             if page in self._pages:
                 for ele in self._pages[page]:
                     batch_indexes.append(page)
@@ -256,7 +257,7 @@ with tf.Session(graph=graph) as session:
             if args.detached:
                 category_indexes, categories = pages.generate_detached_batch(args.batch_size)
             else:
-                category_indexes, categories = pages.generate_batch(batch_inputs)
+                category_indexes, categories = pages.generate_batch(batch_inputs, batch_labels)
         if len(categories) is 0:
             categories.append(0)
             category_indexes.append(0)
@@ -283,6 +284,12 @@ with tf.Session(graph=graph) as session:
                   "s)")
             timestamp = time.time()
             print("Average categories per batch:", average_cat_per_page)
+            print("Last pages -> categories:")
+            stop = len(category_indexes)
+            if stop > 10:
+                stop = 10
+            for idx in range(stop):
+                print("  ", dictionary.rev_dict[category_indexes[idx]], "->", dictionary.rev_dict[categories[idx]])
             last_average_loss = average_loss
             average_loss = 0
             average_cat_per_page = 0
