@@ -27,10 +27,13 @@ class Arguments():
                             help='Num skips (default {0})'.format(Arguments.DEFAULT_NUM_SKIPS), metavar='#')
         parser.add_argument('--num_sampled', default=Arguments.DEFAULT_NUM_SAMPLED,
                             help='Num sampled (default {0})'.format(Arguments.DEFAULT_NUM_SAMPLED), metavar='#')
+        parser.add_argument('--output', default='', help='Output dir (default - current dir)', metavar='#')
         parser.add_argument('--clean', default=False, action='store_true',
                             help='Calculate only plain skipgram objective')
         parser.add_argument('--detached', default=False, action='store_true',
                             help="Calculate category objective independently of the main one (select it's own samples)")
+        parser.add_argument('--no-margin', default=False, action='store_true',
+                            help="Disable margin from category objective")
         self.args = parser.parse_args()
         self.args.batch_size = int(self.args.batch_size)
         self.args.iterations = int(self.args.iterations)
@@ -40,6 +43,9 @@ class Arguments():
         self.args.window_size = int(self.args.window_size)
         self.args.clean = bool(self.args.clean)
         self.args.detached = bool(self.args.detached)
+        self.args.no_margin = bool(self.args.no_margin)
+        if self.args.output != '' and not self.args.output.endswith('/'):
+            self.args.output += '/'
 
     def show_args(self):
         print("Initialized with settings:")

@@ -4,6 +4,8 @@ from __future__ import print_function
 import collections
 import math
 import time
+from params import TEXTS
+from params import CATEGORIES
 from threading import Thread
 
 from bk2vec.arguments import Arguments
@@ -13,25 +15,19 @@ from bk2vec.textreader import *
 import numpy as np
 import tensorflow as tf
 
-# TEXTS = '/Users/remper/Downloads/bk2vec_input/enwiki-20140203-text-cleaned.csv.gz'
-# CATEGORIES = '/Users/remper/Downloads/bk2vec_input/enwiki-20140203-page-category-out.csv.gz'
-# Borean
-TEXTS = '/borean1/data/pokedem-experiments/bk2vec/alessio/enwiki-20140203-text-cleaned.csv.gz'
-CATEGORIES = '/borean1/data/pokedem-experiments/bk2vec/alessio/enwiki-20140203-page-category-out.csv.gz'
-
 args = Arguments().show_args().args
 text_reader = TextReader(TEXTS)
 
-
 class EvaluationDumper(Thread):
-    def __init__(self, evaluation, postfix):
+    def __init__(self, evaluation, postfix, folder=''):
         Thread.__init__(self)
         self._evaluation = evaluation
         self.postfix = postfix
+        self._folder = folder
 
     def run(self):
         count = 0
-        with gzip.open('categories-' + self.postfix + '.tsv.gz', 'wb') as writer:
+        with gzip.open(self._folder+'categories-' + self.postfix + '.tsv.gz', 'wb') as writer:
             for value in self._evaluation.keys():
                 count += 1
                 row = self._evaluation[value]
@@ -47,8 +43,8 @@ class EvaluationDumper(Thread):
         del self._evaluation
 
 
-def dump_evaluation(evaluation, postfix):
-    dumper = EvaluationDumper(evaluation, postfix)
+def dump_evaluation(evaluation, postfix, folder=''):
+    dumper = EvaluationDumper(evaluation, postfix, folder=folder)
     dumper.start()
     return dumper
 
@@ -76,11 +72,15 @@ def get_num_stems_str(num_steps):
 dictionary = text_reader.load_dictionary()
 tasks = list()
 pages = dict()
+if len(args.output) > 0:
+    if not os.path.exists(args.output):
+        os.makedirs(args.output)
+        print("Created ouput directory")
 if not args.clean:
     pages, evaluation = build_pages(CATEGORIES, dictionary.dict, dictionary.rev_dict)
-    print('Storing test and training set')
-    tasks.append(dump_evaluation(evaluation, "test"))
-    tasks.append(dump_evaluation(pages, "train"))
+    print('Started storing test and training set')
+    tasks.append(dump_evaluation(evaluation, "test", folder=args.output))
+    tasks.append(dump_evaluation(pages, "train", folder=args.output))
     del evaluation
 else:
     print('Ignoring categories file: clean embeddings requested')
@@ -145,7 +145,7 @@ class Pages:
         batch = list()
         for page in input_batch:
             if page in self._pages:
-                for ele in self._pages[input]:
+                for ele in self._pages[page]:
                     batch_indexes.append(page)
                     batch.append(ele)
         return batch_indexes, batch
@@ -215,10 +215,11 @@ with graph.as_default():
                 tf.gather(embeddings.tensor(), train_category_indexes)
             )
             # Margin (we don't want categories to be squashed into the single dot)
-            category_distances = tf.maximum(
-                tf.sub(category_distances, tf.constant(0.5)),
-                tf.zeros_like(category_distances)
-            )
+            if not args.no_margin:
+                category_distances = tf.maximum(
+                    tf.sub(category_distances, tf.constant(0.5)),
+                    tf.zeros_like(category_distances)
+                )
 
         # Categorical knowledge additional term
         with tf.name_scope("category_loss"):
@@ -296,7 +297,7 @@ with tf.Session(graph=graph) as session:
 # Step 6: Dump embeddings to file
 print("Dumping embeddings on disk")
 embeddings.dump(
-    'embeddings-' + str(embeddings.size) + '-' + get_num_stems_str(args.iterations) + '.tsv',
+    args.output+'embeddings-' + str(embeddings.size) + '-' + get_num_stems_str(args.iterations) + '.tsv',
     norm_tensor,
     dictionary
 )
