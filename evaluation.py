@@ -9,15 +9,9 @@ import numpy as np
 import os.path
 
 from bk2vec.embeddings import Embeddings
+from bk2vec.arguments import EvaluationArguments
 
-# CATEGORIES = '/Users/remper/Projects/bk2vec/borean/embeddings_80_500k_traintest_test.gz'
-# EMBEDDINGS = '/Users/remper/Projects/bk2vec/borean/embeddings_80_500k_traintest.tsv.gz'
-# Borean
-# CATEGORIES = '/borean1/data/pokedem-experiments/bk2vec/embeddings_80_500k_traintest_test.gz'
-# EMBEDDINGS = '/borean1/data/pokedem-experiments/bk2vec/embeddings_80_500k_traintest.tsv.gz'
-# Auster
-CATEGORIES = 'categories-test.tsv.gz'
-EMBEDDINGS = 'embeddings-10-50.tsv.gz'
+args = EvaluationArguments().show_args().args
 
 
 def restore_evaluation(filename):
@@ -35,45 +29,16 @@ def restore_evaluation(filename):
     return pages
 
 
-def restore_embeddings(filename):
-    embeddings = list()
-    final_embeddings = list()
-    embeddings_size = 0
-    embeddings_count = 0
-    with gzip.open(filename, 'rb') as csvfile:
-        reader = csv.reader(csvfile, delimiter='\t')
-        try:
-            for row in reader:
-                if embeddings_size == 0:
-                    embeddings_size = len(row) - 1
-                embeddings_count += 1
-                embedding = np.array(map(float, row[1:]))
-                embeddings.append(embedding)
-                if embeddings_count % 2000000 == 0:
-                    print("  " + str(embeddings_count // 1000000) + "m words parsed")
-                    final_embeddings.append(np.array(embeddings))
-                    del embeddings
-                    embeddings = list()
-                    print("  Squashed")
-            final_embeddings.append(np.array(embeddings))
-            final_embeddings = np.vstack(final_embeddings)
-            del embeddings
-        except csv.Error:
-            print(u"Dunno why this error happens")
-    return final_embeddings
-
-
-if not os.path.exists(CATEGORIES):
-    print("Categories file doesn't exist: " + CATEGORIES)
+if not os.path.exists(args.test):
+    print("Categories file doesn't exist: " + args.test)
     exit()
-if not os.path.exists(EMBEDDINGS):
-    print("Embeddings file doesn't exist: " + EMBEDDINGS)
+if not os.path.exists(args.embeddings):
+    print("Embeddings file doesn't exist: " + args.embeddings)
     exit()
 print("Restoring test set")
-pages = restore_evaluation(CATEGORIES)
+pages = restore_evaluation(args.test)
 print("Restoring embeddings")
-# embeddings = restore_embeddings(EMBEDDINGS)
-embeddings = Embeddings.restore(EMBEDDINGS)
+embeddings, rev_dict = Embeddings.restore(args.embeddings)
 print("Restored embeddings with shape:", embeddings.shape)
 
 graph = tf.Graph()
@@ -82,9 +47,16 @@ graph = tf.Graph()
 def matrix_distance(tensor1, tensor2):
     with tf.name_scope("matrix_distance"):
         sub = tf.sub(tensor1, tensor2)
-        distance = tf.sqrt(tf.clip_by_value(tf.reduce_sum(tf.pow(sub, 2), 1), 1e-10, 1e+37))
+        distance = tf.sqrt(tf.clip_by_value(tf.reduce_sum(tf.square(sub), 1), 1e-10, 1e+37))
         return distance
 
+log = open(args.test+'.log', 'wb')
+log.write(str(vars(args)))
+log.write('\n')
+def print_log(*args):
+    print(*args)
+    log.write(" ".join([str(ele) for ele in args]))
+    log.write('\n')
 
 with graph.as_default():
     # Input
@@ -104,21 +76,33 @@ with graph.as_default():
     print("Starting calculating pages loss")
     indices = list()
     page_indices = list()
+    last_indices = list()
+    last_page_indices = list()
     for page in pages.keys():
         if len(pages[page]) == 0:
             continue
         counts += 1
-        indices.extend(pages[page])
-        page_indices.extend([page] * len(pages[page]))
+        for ele in pages[page]:
+            indices.append(ele)
+            page_indices.append(page)
         if counts % 100 == 0:
-            category_input = embeddings[np.array(indices)]
-            page_input = embeddings[np.array(page_indices)]
+            category_input = np.take(embeddings, indices, axis=0)
+            page_input = np.take(embeddings, page_indices, axis=0)
+            last_indices = indices
+            last_page_indices = page_indices
             indices = list()
             page_indices = list()
             with tf.Session(graph=graph) as session:
                 loss += session.run(category_loss, feed_dict={category_tensor: category_input, page_tensor: page_input})
         if counts % 1000000 == 0:
-            print("  " + str(counts // 1000) + "k pages parsed")
-            print("  Avg loss:", loss / (counts / 100))
+            print_log("Last input shape:", category_input.shape, page_input.shape)
+            print_log("Last amount of categories:", len(last_page_indices))
+            print_log("Last pages -> categories:")
+            for idx in range(20):
+                print(rev_dict[last_page_indices[idx]], '->', rev_dict[last_indices[idx]])
+            print_log("  " + str(counts // 1000) + "k pages parsed")
+            print_log("  Avg loss:", loss / (counts / 100))
 
-    print("Average loss: ", loss / (counts / 100))
+    print_log("Average loss: ", loss / (counts / 100))
+
+log.close()

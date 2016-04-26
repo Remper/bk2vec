@@ -3,7 +3,6 @@ from __future__ import print_function
 
 import collections
 import math
-import time
 from params import TEXTS
 from params import CATEGORIES
 from threading import Thread
@@ -132,6 +131,7 @@ class Pages:
                 yield page
 
     def generate_detached_batch(self, batch_size):
+        batch_size *= 2
         batch_indexes = list()
         batch = list()
         while len(batch_indexes) < batch_size:

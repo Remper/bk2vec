@@ -4,7 +4,17 @@ from __future__ import print_function
 import argparse
 
 
-class Arguments():
+class AbstractArguments():
+    def __init__(self, parser):
+        self.args = parser.parse_args()
+
+    def show_args(self):
+        print("Initialized with settings:")
+        print(vars(self.args))
+        return self
+
+
+class Arguments(AbstractArguments):
     DEFAULT_ITERATIONS = 2000001  # Amount of steps
     DEFAULT_BATCH_SIZE = 128  # Size of the batch for every iteration
     DEFAULT_EMBEDDING_SIZE = 90  # Dimension of the embedding vector.
@@ -14,6 +24,20 @@ class Arguments():
     DEFAULT_MARGIN = 1.0 # Default margin for the category objective
 
     def __init__(self):
+        AbstractArguments.__init__(self, self.get_parser())
+        self.args.batch_size = int(self.args.batch_size)
+        self.args.iterations = int(self.args.iterations)
+        self.args.embeddings_size = int(self.args.embeddings_size)
+        self.args.num_skips = int(self.args.num_skips)
+        self.args.num_sampled = int(self.args.num_sampled)
+        self.args.window_size = int(self.args.window_size)
+        self.args.margin = float(self.args.margin)
+        self.args.clean = bool(self.args.clean)
+        self.args.detached = bool(self.args.detached)
+        if self.args.output != '' and not self.args.output.endswith('/'):
+            self.args.output += '/'
+
+    def get_parser(self):
         parser = argparse.ArgumentParser(description='Train Word2Vec.')
 
         parser.add_argument('--iterations', default=Arguments.DEFAULT_ITERATIONS,
@@ -35,20 +59,16 @@ class Arguments():
                             help='Calculate only plain skipgram objective')
         parser.add_argument('--detached', default=False, action='store_true',
                             help="Calculate category objective independently of the main one (select it's own samples)")
-        self.args = parser.parse_args()
-        self.args.batch_size = int(self.args.batch_size)
-        self.args.iterations = int(self.args.iterations)
-        self.args.embeddings_size = int(self.args.embeddings_size)
-        self.args.num_skips = int(self.args.num_skips)
-        self.args.num_sampled = int(self.args.num_sampled)
-        self.args.window_size = int(self.args.window_size)
-        self.args.margin = float(self.args.margin)
-        self.args.clean = bool(self.args.clean)
-        self.args.detached = bool(self.args.detached)
-        if self.args.output != '' and not self.args.output.endswith('/'):
-            self.args.output += '/'
+        return parser
 
-    def show_args(self):
-        print("Initialized with settings:")
-        print(vars(self.args))
-        return self
+
+class EvaluationArguments(AbstractArguments):
+    def __init__(self):
+        AbstractArguments.__init__(self, self.get_parser())
+
+    def get_parser(self):
+        parser = argparse.ArgumentParser(description='Evaluate Word2Vec.')
+
+        parser.add_argument('--test', default='', required=True, help='Location of test set', metavar='#')
+        parser.add_argument('--embeddings', required=True, help='Location of embeddings', metavar='#')
+        return parser

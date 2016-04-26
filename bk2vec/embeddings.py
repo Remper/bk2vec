@@ -51,11 +51,14 @@ class Embeddings:
         final_embeddings = list()
         embeddings = list()
         count = 0
+        rev_dict = dict()
         with gzip.open(filename, 'rb') as reader:
             timestamp = time.time()
             for line in reader:
                 row = line.split('\t')
-                embeddings.append(np.array(map(float, row[1:])))
+                #embeddings.append(np.array(map(float, row[1:])))
+                embeddings.append(np.array([float(ele.strip().strip('"')) for ele in row[1:]]))
+                rev_dict[count] = row[0]
                 count += 1
                 if count % 2000000 == 0:
                     print("  ", str(count // 1000000) + "m words parsed (" + ("%.5f" % (time.time() - timestamp)) + "s)")
@@ -64,6 +67,7 @@ class Embeddings:
                     del embeddings
                     embeddings = list()
                     print("  Squashed")
+        print("  ", str(count // 1000000) + "m words parsed (" + ("%.5f" % (time.time() - timestamp)) + "s)")
         final_embeddings.append(np.array(embeddings))
         del embeddings
-        return np.vstack(final_embeddings)
+        return np.vstack(final_embeddings), rev_dict
