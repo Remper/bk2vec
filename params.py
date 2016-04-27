@@ -1,2 +1,3 @@
-TEXTS = '/borean1/data/pokedem-experiments/bk2vec/alessio/enwiki-20140203-text-cleaned.csv.gz'
-CATEGORIES = '/borean1/data/pokedem-experiments/bk2vec/alessio/enwiki-20140203-page-category-out.csv.gz'
+TEXTS = '/borean1/data/pokedem-experiments/bk2vec/final_experiments/text.csv.gz'
+CATEGORIES_TOKEN = '/borean1/data/pokedem-experiments/bk2vec/final_experiments/token.csv.gz'
+CATEGORIES_NOTOKEN = '/borean1/data/pokedem-experiments/bk2vec/final_experiments/notoken.csv.gz'

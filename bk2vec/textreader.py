@@ -18,15 +18,15 @@ class TextReader():
         self.type = type
 
     def words(self):
-        previous = list()
+        previous = 0
         with self._get_handler(self.filename) as csvfile:
             reader = csv.reader(csvfile, delimiter='\t', quoting=csv.QUOTE_NONE, quotechar='')
             try:
                 for row in reader:
-                    if (len(row) is not 2):
-                        print("Inconsistency in relations file. Previous:", previous, "Current:", row)
+                    if len(row) is not 2:
+                        print("Inconsistency in relations file. Previous:", previous, "Current:", len(row))
                         continue
-                    previous = row
+                    previous = len(row)
                     for word in [row[0]] + row[1].split():
                         yield word
             except csv.Error:
@@ -54,7 +54,7 @@ class TextReader():
                 continue
             counts[word] = 1
         print("Parsing finished")
-        print("Removing a tail and assembling a dictionary")
+        print("Removing a tail and assembling a dictionary (Threshold: ", DICTIONARY_THRESHOLD, ")")
         filtered_dictionary = Dictionary()
         processed = 0
         timestamp = time.time()
@@ -189,7 +189,6 @@ def build_pages(filename, dictionary, reverse_dictionary):
                         dictionary[word] = len(dictionary)
                         reverse_dictionary[dictionary[word]] = word
                         category_notfound += 1
-                        continue
                     category_found += 1
                     if test_set > 0 and random.random() <= test_set:
                         test_set_size += 1

@@ -4,7 +4,8 @@ from __future__ import print_function
 import collections
 import math
 from params import TEXTS
-from params import CATEGORIES
+from params import CATEGORIES_NOTOKEN
+from params import CATEGORIES_TOKEN
 from threading import Thread
 
 from bk2vec.arguments import Arguments
@@ -16,6 +17,31 @@ import tensorflow as tf
 
 args = Arguments().show_args().args
 text_reader = TextReader(TEXTS)
+
+log = None
+def init_log():
+    global log
+    log = open(args.output+'training.log', 'wb')
+    log.write(str(vars(args)))
+    log.write('\n')
+
+
+def print_log(*args):
+    if log is None:
+        init_log()
+    print(*args)
+    log.write(" ".join([str(ele) for ele in args]))
+    log.write('\n')
+
+if len(args.output) > 0:
+    if not os.path.exists(args.output):
+        os.makedirs(args.output)
+        print_log("Created output directory")
+
+if args.notoken:
+    CATEGORIES = CATEGORIES_NOTOKEN
+else:
+    CATEGORIES = CATEGORIES_TOKEN
 
 class EvaluationDumper(Thread):
     def __init__(self, evaluation, postfix, folder=''):
@@ -71,20 +97,16 @@ def get_num_stems_str(num_steps):
 dictionary = text_reader.load_dictionary()
 tasks = list()
 pages = dict()
-if len(args.output) > 0:
-    if not os.path.exists(args.output):
-        os.makedirs(args.output)
-        print("Created ouput directory")
 if not args.clean:
     pages, evaluation = build_pages(CATEGORIES, dictionary.dict, dictionary.rev_dict)
-    print('Started storing test and training set')
+    print_log('Started storing test and training set')
     tasks.append(dump_evaluation(evaluation, "test", folder=args.output))
     tasks.append(dump_evaluation(pages, "train", folder=args.output))
     del evaluation
 else:
-    print('Ignoring categories file: clean embeddings requested')
+    print_log('Ignoring categories file: clean embeddings requested')
 vocabulary_size = len(dictionary)
-print('Vocabulary size: ', vocabulary_size)
+print_log('Vocabulary size: ', vocabulary_size)
 
 
 # Step 3: Function to generate a training batch for the skip-gram model.
@@ -154,8 +176,8 @@ class Pages:
 data_reader = text_reader.endless_words()
 batch, labels = generate_batch(data_reader, dictionary, batch_size=8, num_skips=2, skip_window=1)
 for i in range(8):
-    print(batch[i], '->', labels[i, 0])
-    print(dictionary.rev_dict[batch[i]], '->', dictionary.rev_dict[labels[i, 0]])
+    print_log(batch[i], '->', labels[i, 0])
+    print_log(dictionary.rev_dict[batch[i]], '->', dictionary.rev_dict[labels[i, 0]])
 
 
 # Step 4: Build and train a skip-gram model.
@@ -238,10 +260,11 @@ with graph.as_default():
 
 # Step 5: Begin training.
 with tf.Session(graph=graph) as session:
+    timestamp = time.time()
     merged = tf.merge_all_summaries()
     writer = tf.train.SummaryWriter("logs", graph)
     tf.initialize_all_variables().run()
-    print("Initialized")
+    print_log("Initialized", ("%.5f" % (time.time() - timestamp)), "s")
 
     average_loss = 0
     average_cat_per_page = 0
@@ -255,8 +278,17 @@ with tf.Session(graph=graph) as session:
         categories = list()
         category_indexes = list()
         if not args.clean:
-            if args.detached:
+            if args.mode == 'detached':
                 category_indexes, categories = pages.generate_detached_batch(args.batch_size)
+            elif args.mode == 'combo':
+                category_indexes = list()
+                categories = list()
+                idxs, cats = pages.generate_detached_batch(args.batch_size)
+                category_indexes.extend(idxs)
+                categories.extend(cats)
+                idxs, cats = pages.generate_batch(batch_inputs, batch_labels)
+                category_indexes.extend(idxs)
+                categories.extend(cats)
             else:
                 category_indexes, categories = pages.generate_batch(batch_inputs, batch_labels)
         if len(categories) is 0:
@@ -281,16 +313,16 @@ with tf.Session(graph=graph) as session:
                 average_loss /= 2000
                 average_cat_per_page /= 2000
             # The average loss is an estimate of the loss over the last 2000 batches.
-            print("Average loss at step ", get_num_stems_str(step), ": ", average_loss, "(", time.time() - timestamp,
+            print_log("Average loss at step ", get_num_stems_str(step), ": ", average_loss, "(", time.time() - timestamp,
                   "s)")
             timestamp = time.time()
-            print("Average categories per batch:", average_cat_per_page)
-            print("Last pages -> categories:")
+            print_log("Average categories per batch:", average_cat_per_page)
+            print_log("Last pages -> categories:")
             stop = len(category_indexes)
             if stop > 10:
                 stop = 10
             for idx in range(stop):
-                print("  ", dictionary.rev_dict[category_indexes[idx]], "->", dictionary.rev_dict[categories[idx]])
+                print_log("  ", dictionary.rev_dict[category_indexes[idx]], "->", dictionary.rev_dict[categories[idx]])
             last_average_loss = average_loss
             average_loss = 0
             average_cat_per_page = 0
@@ -300,16 +332,17 @@ with tf.Session(graph=graph) as session:
     del pages
     timestamp = time.time()
     norm_tensor = embeddings.normalized_tensor().eval()
-    print("Tensor normalized in", time.time() - timestamp, "s")
+    print_log("Tensor normalized in", ("%.5f" % (time.time() - timestamp)), "s")
 
 # Step 6: Dump embeddings to file
-print("Dumping embeddings on disk")
+print_log("Dumping embeddings on disk")
 embeddings.dump(
     args.output+'embeddings-' + str(embeddings.size) + '-' + get_num_stems_str(args.iterations) + '.tsv',
     norm_tensor,
     dictionary
 )
 
-print("Waiting for evaluation dumping to finish...")
+print_log("Waiting for evaluation dumping to finish...")
 control_evaluation(tasks)
-print("Done")
+print_log("Done")
+log.close()

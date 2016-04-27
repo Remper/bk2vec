@@ -22,6 +22,7 @@ class Arguments(AbstractArguments):
     DEFAULT_NUM_SKIPS = 2  # How many times to reuse an input to generate a label..
     DEFAULT_NUM_SAMPLED = 64  # Number of negative examples to sample.
     DEFAULT_MARGIN = 1.0 # Default margin for the category objective
+    DEFAULT_MODE = 'attached'
 
     def __init__(self):
         AbstractArguments.__init__(self, self.get_parser())
@@ -33,7 +34,7 @@ class Arguments(AbstractArguments):
         self.args.window_size = int(self.args.window_size)
         self.args.margin = float(self.args.margin)
         self.args.clean = bool(self.args.clean)
-        self.args.detached = bool(self.args.detached)
+        self.args.notoken = bool(self.args.notoken)
         if self.args.output != '' and not self.args.output.endswith('/'):
             self.args.output += '/'
 
@@ -54,11 +55,13 @@ class Arguments(AbstractArguments):
                             help='Num sampled (default {0})'.format(Arguments.DEFAULT_NUM_SAMPLED), metavar='#')
         parser.add_argument('--margin', default=Arguments.DEFAULT_MARGIN, metavar='#',
                             help='Margin for category objective (default {0})'.format(Arguments.DEFAULT_MARGIN))
+        parser.add_argument('--mode', default=Arguments.DEFAULT_MODE, metavar='#',
+                            help='Category objective type ("attached", "detached", "combo", default "{0}")'.format(Arguments.DEFAULT_MODE))
+        parser.add_argument('--notoken', default=False, action='store_true',
+                            help='User untokenized version of categories')
         parser.add_argument('--output', default='', help='Output dir (default - current dir)', metavar='#')
         parser.add_argument('--clean', default=False, action='store_true',
                             help='Calculate only plain skipgram objective')
-        parser.add_argument('--detached', default=False, action='store_true',
-                            help="Calculate category objective independently of the main one (select it's own samples)")
         return parser
 
 
