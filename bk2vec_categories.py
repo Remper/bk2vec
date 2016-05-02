@@ -6,11 +6,11 @@ import math
 from params import TEXTS
 from params import CATEGORIES_NOTOKEN
 from params import CATEGORIES_TOKEN
-from threading import Thread
 
 from bk2vec.arguments import Arguments
 from bk2vec.embeddings import Embeddings
 from bk2vec.textreader import *
+from bk2vec.evaluation import *
 
 import numpy as np
 import tensorflow as tf
@@ -43,42 +43,6 @@ if args.notoken:
 else:
     CATEGORIES = CATEGORIES_TOKEN
 
-class EvaluationDumper(Thread):
-    def __init__(self, evaluation, postfix, folder=''):
-        Thread.__init__(self)
-        self._evaluation = evaluation
-        self.postfix = postfix
-        self._folder = folder
-
-    def run(self):
-        count = 0
-        with gzip.open(self._folder+'categories-' + self.postfix + '.tsv.gz', 'wb') as writer:
-            for value in self._evaluation.keys():
-                count += 1
-                row = self._evaluation[value]
-                if len(row) == 0:
-                    continue
-                writer.write(str(value))
-                writer.write('\t')
-                writer.write('\t'.join(map(str, row)))
-                writer.write('\n')
-                if count % 100000 == 0:
-                    print("  ", str(count // 1000) + "k words parsed (" + self.postfix + ")")
-        print("Finished dumping ", self.postfix)
-        del self._evaluation
-
-
-def dump_evaluation(evaluation, postfix, folder=''):
-    dumper = EvaluationDumper(evaluation, postfix, folder=folder)
-    dumper.start()
-    return dumper
-
-
-def control_evaluation(threads):
-    for dumper in threads:
-        dumper.join()
-
-
 def get_num_stems_str(num_steps):
     letter = ''
     divider = 1
@@ -96,15 +60,11 @@ def get_num_stems_str(num_steps):
 
 dictionary = text_reader.load_dictionary()
 tasks = list()
-pages = dict()
-if not args.clean:
-    pages, evaluation = build_pages(CATEGORIES, dictionary.dict, dictionary.rev_dict)
-    print_log('Started storing test and training set')
-    tasks.append(dump_evaluation(evaluation, "test", folder=args.output))
-    tasks.append(dump_evaluation(pages, "train", folder=args.output))
-    del evaluation
-else:
-    print_log('Ignoring categories file: clean embeddings requested')
+pages, evaluation = build_pages(CATEGORIES, dictionary.dict, dictionary.rev_dict)
+print_log('Started storing test and training set')
+tasks.append(dump_evaluation(evaluation, "test", folder=args.output))
+tasks.append(dump_evaluation(pages, "train", folder=args.output))
+del evaluation
 vocabulary_size = len(dictionary)
 print_log('Vocabulary size: ', vocabulary_size)
 

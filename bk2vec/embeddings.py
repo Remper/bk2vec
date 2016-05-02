@@ -1,7 +1,7 @@
 from __future__ import absolute_import
 from __future__ import print_function
 
-import tensorflow as tf
+#import tensorflow as tf
 import gzip
 import numpy as np
 import time
@@ -52,6 +52,7 @@ class Embeddings:
         embeddings = list()
         count = 0
         rev_dict = dict()
+        dictionary = dict()
         with gzip.open(filename, 'rb') as reader:
             timestamp = time.time()
             for line in reader:
@@ -59,6 +60,7 @@ class Embeddings:
                 #embeddings.append(np.array(map(float, row[1:])))
                 embeddings.append(np.array([float(ele.strip().strip('"')) for ele in row[1:]]))
                 rev_dict[count] = row[0]
+                dictionary[row[0]] = count
                 count += 1
                 if count % 2000000 == 0:
                     print("  ", str(count // 1000000) + "m words parsed (" + ("%.5f" % (time.time() - timestamp)) + "s)")
@@ -70,4 +72,4 @@ class Embeddings:
         print("  ", str(count // 1000000) + "m words parsed (" + ("%.5f" % (time.time() - timestamp)) + "s)")
         final_embeddings.append(np.array(embeddings))
         del embeddings
-        return np.vstack(final_embeddings), rev_dict
+        return np.vstack(final_embeddings), rev_dict, dictionary

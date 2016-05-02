@@ -75,3 +75,29 @@ class EvaluationArguments(AbstractArguments):
         parser.add_argument('--test', default='', required=True, help='Location of test set', metavar='#')
         parser.add_argument('--embeddings', required=True, help='Location of embeddings', metavar='#')
         return parser
+
+
+class FilterArguments(AbstractArguments):
+    def __init__(self):
+        AbstractArguments.__init__(self, self.get_parser())
+        if self.args.output != '' and not self.args.output.endswith('/'):
+            self.args.output += '/'
+
+    def get_parser(self):
+        parser = argparse.ArgumentParser(description='Evaluate Word2Vec.')
+
+        parser.add_argument('--test', default='', required=True, help='Location of test set', metavar='#')
+        parser.add_argument('--output', required=True, help='Output folder', metavar='#')
+        return parser
+
+
+class RenderArguments(AbstractArguments):
+    def __init__(self):
+        AbstractArguments.__init__(self, self.get_parser())
+
+    def get_parser(self):
+        parser = argparse.ArgumentParser(description='Evaluate Word2Vec.')
+
+        parser.add_argument('--indices', default='', required=True, help='Location of indices to render', metavar='#')
+        parser.add_argument('--embeddings', required=True, help='Location of embeddings', metavar='#')
+        return parser

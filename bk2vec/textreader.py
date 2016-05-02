@@ -37,7 +37,7 @@ class TextReader():
             for word in self.words():
                 yield word
 
-    def build_dictionary(self):
+    def build_dictionary(self, threshold=None):
         print("Building word frequency list")
         processed = 0
         counts = dict()
@@ -54,7 +54,9 @@ class TextReader():
                 continue
             counts[word] = 1
         print("Parsing finished")
-        print("Removing a tail and assembling a dictionary (Threshold: ", DICTIONARY_THRESHOLD, ")")
+        if threshold is None:
+            threshold = DICTIONARY_THRESHOLD
+        print("Removing a tail and assembling a dictionary (Threshold: ", threshold, ")")
         filtered_dictionary = Dictionary()
         processed = 0
         timestamp = time.time()
@@ -66,7 +68,7 @@ class TextReader():
                 timestamp = time.time()
             if counts[word] >= DICTIONARY_THRESHOLD:
                 filtered_dictionary.add_word(word)
-        return filtered_dictionary
+        return filtered_dictionary, counts
 
     def restore_dictionary(self):
         print('Restoring dictionary')
@@ -100,7 +102,8 @@ class TextReader():
             print("Dictionary restored in", ("%.5f" % (time.time() - timestamp)) + "s")
         else:
             timestamp = time.time()
-            dictionary = self.build_dictionary()
+            dictionary, counts = self.build_dictionary()
+            del counts
             print("Dictionary is built in", ("%.5f" % (time.time() - timestamp)) + "s")
             timestamp = time.time()
             self.store_dictionary(dictionary)

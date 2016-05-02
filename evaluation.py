@@ -17,6 +17,7 @@ args = EvaluationArguments().show_args().args
 def restore_evaluation(filename):
     pages = dict()
     categories = 0
+    unique_categories = dict()
     with gzip.open(filename, 'rb') as csvfile:
         reader = csv.reader(csvfile, delimiter='\t', quoting=csv.QUOTE_NONE, quotechar='')
         for row in reader:
@@ -24,8 +25,10 @@ def restore_evaluation(filename):
                 continue
             index = int(row[0])
             pages[index] = np.array(map(int, row[1:]))
+            for category in row[1:]:
+                unique_categories[category] = 0
             categories += len(pages[index])
-    print("Loaded", len(pages.values()), "pages with", categories, "categories")
+    print("Loaded", len(pages.values()), "pages with", categories, "categories", len(unique_categories), "unique categories")
     return pages
 
 
@@ -38,7 +41,7 @@ if not os.path.exists(args.embeddings):
 print("Restoring test set")
 pages = restore_evaluation(args.test)
 print("Restoring embeddings")
-embeddings, rev_dict = Embeddings.restore(args.embeddings)
+embeddings, rev_dict, _ = Embeddings.restore(args.embeddings)
 print("Restored embeddings with shape:", embeddings.shape)
 
 graph = tf.Graph()
