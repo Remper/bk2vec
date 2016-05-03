@@ -4,7 +4,6 @@ from __future__ import print_function
 
 import numpy as np
 import os
-from sklearn.preprocessing import normalize
 
 from bk2vec.embeddings import Embeddings
 from bk2vec.arguments import RenderArguments
