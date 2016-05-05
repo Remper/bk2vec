@@ -15,9 +15,9 @@ class AbstractArguments():
 
 
 class Arguments(AbstractArguments):
-    DEFAULT_ITERATIONS = 3000001  # Amount of steps
+    DEFAULT_ITERATIONS = 5000001  # Amount of steps
     DEFAULT_BATCH_SIZE = 256  # Size of the batch for every iteration
-    DEFAULT_EMBEDDING_SIZE = 90  # Dimension of the embedding vector.
+    DEFAULT_EMBEDDING_SIZE = 128  # Dimension of the embedding vector.
     DEFAULT_WINDOW_SIZE = 3  # Default size of the context
     DEFAULT_NUM_SKIPS = 2  # How many times to reuse an input to generate a label..
     DEFAULT_NUM_SAMPLED = 64  # Number of negative examples to sample.

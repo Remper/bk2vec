@@ -18,7 +18,9 @@ from threading import Lock
 import tensorflow as tf
 
 args = Arguments().show_args().args
-text_reader = TextReader(args.output+'text.bin', args.window_size, args.threads, args.batch_size)
+pre_thread_count = int(args.threads * 0.25)
+proc_threads = args.threads - pre_thread_count
+text_reader = TextReader(args.output+'text.bin', args.window_size, pre_thread_count, args.batch_size)
 
 log = None
 def init_log():
@@ -164,7 +166,7 @@ with graph.as_default():
             tf.nn.nce_loss(nce_weights, nce_biases, embed, train_labels, args.num_sampled, embeddings.vocabulary_size)
             , name="skipgram_loss"
         )
-        loss = tf.mul(tf.constant(0.1), loss, name="skipgram_contrib_coeff")
+        #loss = tf.mul(tf.constant(0.1), loss, name="skipgram_contrib_coeff")
         skipgram_loss_summary = tf.scalar_summary("skipgram_loss", loss)
 
     joint_loss = loss
@@ -221,7 +223,7 @@ class TrainingWorker(Thread):
 
             if count % 2000 == 0:
                 average_loss /= 2000
-                print_log("Average loss at step ", get_num_stems_str(step), ": ", average_loss)
+                print_log("Average loss at step "+get_num_stems_str(step)+":", average_loss)
                 average_loss = 0
 
 # Step 5: Begin training.
@@ -241,10 +243,11 @@ with tf.Session(graph=graph) as session:
     timestamp = time.time()
     pages = Pages(pages)
     workers = list()
-    for _ in range(args.threads):
+    for _ in range(proc_threads):
         worker = TrainingWorker(args.iterations, session, writer)
         worker.start()
         workers.append(worker)
+    print_log("Started", proc_threads, "worker threads")
 
     while len(workers) > 0:
         filtered = list()
@@ -254,7 +257,7 @@ with tf.Session(graph=graph) as session:
         workers = filtered
         time.sleep(20)
         newstep = global_step.eval(session)
-        print_log(newstep, "steps processed (",(newstep-step)/20, "steps/s)")
+        print_log(newstep, "steps processed ("+str((newstep-step)/20)+" steps/s)")
         step = newstep
 
     coord.request_stop()
