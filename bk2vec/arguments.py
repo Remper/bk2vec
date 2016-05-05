@@ -15,13 +15,14 @@ class AbstractArguments():
 
 
 class Arguments(AbstractArguments):
-    DEFAULT_ITERATIONS = 2000001  # Amount of steps
-    DEFAULT_BATCH_SIZE = 128  # Size of the batch for every iteration
+    DEFAULT_ITERATIONS = 3000001  # Amount of steps
+    DEFAULT_BATCH_SIZE = 256  # Size of the batch for every iteration
     DEFAULT_EMBEDDING_SIZE = 90  # Dimension of the embedding vector.
-    DEFAULT_WINDOW_SIZE = 2  # Default size of the context
+    DEFAULT_WINDOW_SIZE = 3  # Default size of the context
     DEFAULT_NUM_SKIPS = 2  # How many times to reuse an input to generate a label..
     DEFAULT_NUM_SAMPLED = 64  # Number of negative examples to sample.
     DEFAULT_MARGIN = 1.0 # Default margin for the category objective
+    DEFAULT_NUM_THREADS = 8 # Default amount of threads for prefetching/processing
     DEFAULT_MODE = 'attached'
 
     def __init__(self):
@@ -32,6 +33,7 @@ class Arguments(AbstractArguments):
         self.args.num_skips = int(self.args.num_skips)
         self.args.num_sampled = int(self.args.num_sampled)
         self.args.window_size = int(self.args.window_size)
+        self.args.threads = int(self.args.threads)
         self.args.margin = float(self.args.margin)
         self.args.clean = bool(self.args.clean)
         self.args.notoken = bool(self.args.notoken)
@@ -51,6 +53,8 @@ class Arguments(AbstractArguments):
                             help='Window size (default {0})'.format(Arguments.DEFAULT_WINDOW_SIZE), metavar='#')
         parser.add_argument('--num_skips', default=Arguments.DEFAULT_NUM_SKIPS,
                             help='Num skips (default {0})'.format(Arguments.DEFAULT_NUM_SKIPS), metavar='#')
+        parser.add_argument('--threads', default=Arguments.DEFAULT_NUM_THREADS,
+                            help='Num threads (default {0})'.format(Arguments.DEFAULT_NUM_THREADS), metavar='#')
         parser.add_argument('--num_sampled', default=Arguments.DEFAULT_NUM_SAMPLED,
                             help='Num sampled (default {0})'.format(Arguments.DEFAULT_NUM_SAMPLED), metavar='#')
         parser.add_argument('--margin', default=Arguments.DEFAULT_MARGIN, metavar='#',

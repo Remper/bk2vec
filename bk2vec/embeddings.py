@@ -1,7 +1,7 @@
 from __future__ import absolute_import
 from __future__ import print_function
 
-#import tensorflow as tf
+import tensorflow as tf
 import gzip
 import numpy as np
 import time

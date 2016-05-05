@@ -1,22 +1,24 @@
 from __future__ import absolute_import
 from __future__ import print_function
 
-import collections
 import math
+import os
+
 from params import TEXTS
 from params import CATEGORIES_NOTOKEN
 from params import CATEGORIES_TOKEN
 
 from bk2vec.arguments import Arguments
 from bk2vec.embeddings import Embeddings
-from bk2vec.textreader import *
+from bk2vec.tftextreader import *
+from bk2vec.textreader import build_pages
 from bk2vec.evaluation import *
 
-import numpy as np
+from threading import Lock
 import tensorflow as tf
 
 args = Arguments().show_args().args
-text_reader = TextReader(TEXTS)
+text_reader = TextReader(args.output+'text.bin', args.window_size, args.threads, args.batch_size)
 
 log = None
 def init_log():
@@ -25,7 +27,23 @@ def init_log():
     log.write(str(vars(args)))
     log.write('\n')
 
+def synchronized(lock):
+    """ Synchronization decorator. """
 
+    def wrap(f):
+        def newFunction(*args, **kw):
+            lock.acquire()
+            try:
+                return f(*args, **kw)
+            finally:
+                lock.release()
+
+        return newFunction
+
+    return wrap
+
+print_lock = Lock()
+@synchronized(print_lock)
 def print_log(*args):
     if log is None:
         init_log()
@@ -57,8 +75,11 @@ def get_num_stems_str(num_steps):
     else:
         return "{:.1f}".format(float(num_steps) / divider) + letter
 
+if not os.path.exists(text_reader.filename):
+    dictionary = text_reader.text2bin(TEXTS)
+else:
+    dictionary = text_reader.restore_dictionary()
 
-dictionary = text_reader.load_dictionary()
 tasks = list()
 pages, evaluation = build_pages(CATEGORIES, dictionary.dict, dictionary.rev_dict)
 print_log('Started storing test and training set')
@@ -67,39 +88,6 @@ tasks.append(dump_evaluation(pages, "train", folder=args.output))
 del evaluation
 vocabulary_size = len(dictionary)
 print_log('Vocabulary size: ', vocabulary_size)
-
-
-# Step 3: Function to generate a training batch for the skip-gram model.
-def generate_batch(reader, dictionary, batch_size, num_skips, skip_window):
-    assert batch_size % num_skips == 0
-    assert num_skips <= 2 * skip_window
-    batch = np.ndarray(shape=(batch_size), dtype=np.int32)
-    labels = np.ndarray(shape=(batch_size, 1), dtype=np.int32)
-    span = 2 * skip_window + 1  # [ skip_window target skip_window ]
-    buffer = collections.deque(maxlen=span)
-    for _ in range(span):
-        buffer.append(reader.next())
-    for i in range(batch_size // num_skips):
-        target = skip_window  # target label at the center of the buffer
-        targets_to_avoid = [skip_window]
-        for j in range(num_skips):
-            while target in targets_to_avoid:
-                target = random.randint(0, span - 1)
-            targets_to_avoid.append(target)
-            input = buffer[skip_window]
-            label = buffer[target]
-            try:
-                input = dictionary.dict[input]
-            except:
-                input = 0
-            try:
-                label = dictionary.dict[label]
-            except:
-                label = 0
-            batch[i * num_skips + j] = input
-            labels[i * num_skips + j, 0] = label
-        buffer.append(reader.next())
-    return batch, labels
 
 
 class Pages:
@@ -113,7 +101,6 @@ class Pages:
                 yield page
 
     def generate_detached_batch(self, batch_size):
-        batch_size *= 2
         batch_indexes = list()
         batch = list()
         while len(batch_indexes) < batch_size:
@@ -132,12 +119,6 @@ class Pages:
                     batch_indexes.append(page)
                     batch.append(ele)
         return batch_indexes, batch
-
-data_reader = text_reader.endless_words()
-batch, labels = generate_batch(data_reader, dictionary, batch_size=8, num_skips=2, skip_window=1)
-for i in range(8):
-    print_log(batch[i], '->', labels[i, 0])
-    print_log(dictionary.rev_dict[batch[i]], '->', dictionary.rev_dict[labels[i, 0]])
 
 
 # Step 4: Build and train a skip-gram model.
@@ -160,21 +141,20 @@ with graph.as_default():
     embeddings = Embeddings(vocabulary_size, args.embeddings_size)
 
     # Input data.
-    train_inputs = tf.placeholder(tf.int32, shape=[args.batch_size], name="train_inputs")
-    train_labels = tf.placeholder(tf.int32, shape=[args.batch_size, 1], name="train_labels")
+    train_inputs, train_labels = text_reader.get_reading_ops()
+    train_inputs = tf.squeeze(train_inputs)
     train_categories = tf.placeholder(tf.int32, shape=[None], name="train_categories")
     train_category_indexes = tf.placeholder(tf.int32, shape=[None], name="train_category_indexes")
+    global_step = tf.Variable(0, name='global_step', trainable=False)
 
-    # Ops and variables pinned to the CPU because of missing GPU implementation
-    with tf.device('/cpu:0'):
-        # Look up embeddings for inputs.
-        embed = tf.nn.embedding_lookup(embeddings.tensor(), train_inputs)
+    # Look up embeddings for inputs.
+    embed = tf.nn.embedding_lookup(embeddings.tensor(), train_inputs)
 
-        # Construct the variables for the NCE loss
-        nce_weights = tf.Variable(
-            tf.truncated_normal([embeddings.vocabulary_size, embeddings.size],
-                                stddev=1.0 / math.sqrt(embeddings.size)), name="NCE_weights")
-        nce_biases = tf.Variable(tf.zeros([vocabulary_size]), name="NCE_biases")
+    # Construct the variables for the NCE loss
+    nce_weights = tf.Variable(
+        tf.truncated_normal([embeddings.vocabulary_size, embeddings.size],
+                            stddev=1.0 / math.sqrt(embeddings.size)), name="NCE_weights")
+    nce_biases = tf.Variable(tf.zeros([vocabulary_size]), name="NCE_biases")
 
     # Compute the average NCE loss for the batch.
     # tf.nce_loss automatically draws a new sample of the negative labels each
@@ -216,15 +196,43 @@ with graph.as_default():
 
     # Construct the SGD optimizer using a learning rate of 1.0.
     loss_summary = tf.scalar_summary("joint_loss", joint_loss)
-    optimizer = tf.train.GradientDescentOptimizer(1.0, name="joint_objective").minimize(joint_loss)
+    optimizer = tf.train.GradientDescentOptimizer(1.0, name="joint_objective").minimize(joint_loss, global_step=global_step)
+    merged = tf.merge_all_summaries()
+
+class TrainingWorker(Thread):
+    def __init__(self, iterations, session, writer):
+        Thread.__init__(self)
+        self._iterations = iterations
+        self._session = session
+        self._writer = writer
+
+    def run(self):
+        step = global_step.eval(self._session)
+        average_loss = 0
+        count = 0
+        while step < self._iterations:
+            categories = [0]
+            category_indexes = [0]
+            feed_dict = { train_categories: categories, train_category_indexes: category_indexes }
+            step, summary, _, loss_val = self._session.run([global_step, merged, optimizer, joint_loss], feed_dict=feed_dict)
+            average_loss += loss_val
+            count += 1
+            writer.add_summary(summary, step)
+
+            if count % 2000 == 0:
+                average_loss /= 2000
+                print_log("Average loss at step ", get_num_stems_str(step), ": ", average_loss)
+                average_loss = 0
 
 # Step 5: Begin training.
 with tf.Session(graph=graph) as session:
     timestamp = time.time()
-    merged = tf.merge_all_summaries()
     writer = tf.train.SummaryWriter("logs", graph)
     tf.initialize_all_variables().run()
     print_log("Initialized", ("%.5f" % (time.time() - timestamp)), "s")
+
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(coord=coord)
 
     average_loss = 0
     average_cat_per_page = 0
@@ -232,62 +240,25 @@ with tf.Session(graph=graph) as session:
     step = 0
     timestamp = time.time()
     pages = Pages(pages)
-    while step < args.iterations:
-        batch_inputs, batch_labels = generate_batch(data_reader, dictionary, args.batch_size, args.num_skips,
-                                                    args.window_size)
-        categories = list()
-        category_indexes = list()
-        if not args.clean:
-            if args.mode == 'detached':
-                category_indexes, categories = pages.generate_detached_batch(args.batch_size)
-            elif args.mode == 'combo':
-                category_indexes = list()
-                categories = list()
-                idxs, cats = pages.generate_detached_batch(args.batch_size)
-                category_indexes.extend(idxs)
-                categories.extend(cats)
-                idxs, cats = pages.generate_batch(batch_inputs, batch_labels)
-                category_indexes.extend(idxs)
-                categories.extend(cats)
-            else:
-                category_indexes, categories = pages.generate_batch(batch_inputs, batch_labels)
-        if len(categories) is 0:
-            categories.append(0)
-            category_indexes.append(0)
-        average_cat_per_page += len(categories)
-        feed_dict = {
-            train_inputs: batch_inputs, train_labels: batch_labels,
-            train_categories: categories, train_category_indexes: category_indexes
-        }
+    workers = list()
+    for _ in range(args.threads):
+        worker = TrainingWorker(args.iterations, session, writer)
+        worker.start()
+        workers.append(worker)
 
-        # We perform one update step by evaluating the optimizer op (including it
-        # in the list of returned values for session.run()
+    while len(workers) > 0:
+        filtered = list()
+        for worker in workers:
+            if worker.is_alive():
+                filtered.append(worker)
+        workers = filtered
+        time.sleep(20)
+        newstep = global_step.eval(session)
+        print_log(newstep, "steps processed (",(newstep-step)/20, "steps/s)")
+        step = newstep
 
-        summary, _, loss_val = session.run([merged, optimizer, joint_loss], feed_dict=feed_dict)
-        writer.add_summary(summary, step)
-
-        average_loss += loss_val
-
-        if step % 2000 == 0:
-            if step > 0:
-                average_loss /= 2000
-                average_cat_per_page /= 2000
-            # The average loss is an estimate of the loss over the last 2000 batches.
-            print_log("Average loss at step ", get_num_stems_str(step), ": ", average_loss, "(", time.time() - timestamp,
-                  "s)")
-            timestamp = time.time()
-            print_log("Average categories per batch:", average_cat_per_page)
-            print_log("Last pages -> categories:")
-            stop = len(category_indexes)
-            if stop > 10:
-                stop = 10
-            for idx in range(stop):
-                print_log("  ", dictionary.rev_dict[category_indexes[idx]], "->", dictionary.rev_dict[categories[idx]])
-            last_average_loss = average_loss
-            average_loss = 0
-            average_cat_per_page = 0
-
-        step += 1
+    coord.request_stop()
+    coord.join(threads)
 
     del pages
     timestamp = time.time()

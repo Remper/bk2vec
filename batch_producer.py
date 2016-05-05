@@ -5,12 +5,12 @@ import struct
 import tensorflow as tf
 
 FILENAME = 'test.test'
-BATCH_SIZE = 10
-WINDOW_SIZE = 2
+BATCH_SIZE = 256
+WINDOW_SIZE = 3
 
 # Proof of concept application that stores numbers in file and then uses tensorflow to load it back into memory
 with open(FILENAME, 'wb') as file:
-    for ele in range(100):
+    for ele in range(1000):
         file.write(struct.pack('=l', ele))
 
 # Loading stream back to memory
@@ -38,7 +38,7 @@ with graph.as_default():
                                       batch_size=32,
                                       num_threads=8,
                                       capacity=10000,
-                                      min_after_dequeue=10,
+                                      min_after_dequeue=100,
                                       enqueue_many=True)
 
 with tf.Session(graph=graph) as sess:
