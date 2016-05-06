@@ -13,50 +13,25 @@ from bk2vec.embeddings import Embeddings
 from bk2vec.tftextreader import *
 from bk2vec.textreader import build_pages
 from bk2vec.evaluation import *
+from bk2vec.utils import Log
 
-from threading import Lock
 import tensorflow as tf
 
 args = Arguments().show_args().args
+if args.threads < 2:
+    print("Can't start with a single thread")
 pre_thread_count = int(args.threads * 0.25)
+if pre_thread_count == 0:
+    pre_thread_count = 1
 proc_threads = args.threads - pre_thread_count
 text_reader = TextReader(args.output+'text.bin', args.window_size, pre_thread_count, args.batch_size)
 
-log = None
-def init_log():
-    global log
-    log = open(args.output+'training.log', 'wb')
-    log.write(str(vars(args)))
-    log.write('\n')
-
-def synchronized(lock):
-    """ Synchronization decorator. """
-
-    def wrap(f):
-        def newFunction(*args, **kw):
-            lock.acquire()
-            try:
-                return f(*args, **kw)
-            finally:
-                lock.release()
-
-        return newFunction
-
-    return wrap
-
-print_lock = Lock()
-@synchronized(print_lock)
-def print_log(*args):
-    if log is None:
-        init_log()
-    print(*args)
-    log.write(" ".join([str(ele) for ele in args]))
-    log.write('\n')
+log = Log(args)
 
 if len(args.output) > 0:
     if not os.path.exists(args.output):
         os.makedirs(args.output)
-        print_log("Created output directory")
+        log.print("Created output directory")
 
 if args.notoken:
     CATEGORIES = CATEGORIES_NOTOKEN
@@ -84,12 +59,12 @@ else:
 
 tasks = list()
 pages, evaluation = build_pages(CATEGORIES, dictionary.dict, dictionary.rev_dict)
-print_log('Started storing test and training set')
+log.print('Started storing test and training set')
 tasks.append(dump_evaluation(evaluation, "test", folder=args.output))
 tasks.append(dump_evaluation(pages, "train", folder=args.output))
 del evaluation
 vocabulary_size = len(dictionary)
-print_log('Vocabulary size: ', vocabulary_size)
+log.print('Vocabulary size: ', vocabulary_size)
 
 
 class Pages:
@@ -201,6 +176,7 @@ with graph.as_default():
     optimizer = tf.train.GradientDescentOptimizer(1.0, name="joint_objective").minimize(joint_loss, global_step=global_step)
     merged = tf.merge_all_summaries()
 
+
 class TrainingWorker(Thread):
     def __init__(self, iterations, session, writer):
         Thread.__init__(self)
@@ -215,15 +191,18 @@ class TrainingWorker(Thread):
         while step < self._iterations:
             categories = [0]
             category_indexes = [0]
-            feed_dict = { train_categories: categories, train_category_indexes: category_indexes }
-            step, summary, _, loss_val = self._session.run([global_step, merged, optimizer, joint_loss], feed_dict=feed_dict)
+            feed_dict = {train_categories: categories, train_category_indexes: category_indexes}
+            step, summary, _, loss_val = self._session.run(
+                [global_step, merged, optimizer, joint_loss],
+                feed_dict=feed_dict
+            )
             average_loss += loss_val
             count += 1
             writer.add_summary(summary, step)
 
             if count % 2000 == 0:
                 average_loss /= 2000
-                print_log("Average loss at step "+get_num_stems_str(step)+":", average_loss)
+                log.print("Average loss at step "+get_num_stems_str(step)+":", average_loss)
                 average_loss = 0
 
 # Step 5: Begin training.
@@ -231,23 +210,19 @@ with tf.Session(graph=graph) as session:
     timestamp = time.time()
     writer = tf.train.SummaryWriter("logs", graph)
     tf.initialize_all_variables().run()
-    print_log("Initialized", ("%.5f" % (time.time() - timestamp)), "s")
+    log.print("Initialized", ("%.5f" % (time.time() - timestamp)), "s")
 
     coord = tf.train.Coordinator()
     threads = tf.train.start_queue_runners(coord=coord)
 
-    average_loss = 0
-    average_cat_per_page = 0
-    last_average_loss = 241
     step = 0
-    timestamp = time.time()
     pages = Pages(pages)
     workers = list()
     for _ in range(proc_threads):
         worker = TrainingWorker(args.iterations, session, writer)
         worker.start()
         workers.append(worker)
-    print_log("Started", proc_threads, "worker threads")
+    log.print("Started", proc_threads, "worker threads")
 
     while len(workers) > 0:
         filtered = list()
@@ -257,7 +232,7 @@ with tf.Session(graph=graph) as session:
         workers = filtered
         time.sleep(20)
         newstep = global_step.eval(session)
-        print_log(newstep, "steps processed ("+str((newstep-step)/20)+" steps/s)")
+        log.print(newstep, "steps processed ("+str((newstep-step)/20)+" steps/s)")
         step = newstep
 
     coord.request_stop()
@@ -266,17 +241,17 @@ with tf.Session(graph=graph) as session:
     del pages
     timestamp = time.time()
     norm_tensor = embeddings.normalized_tensor().eval()
-    print_log("Tensor normalized in", ("%.5f" % (time.time() - timestamp)), "s")
+    log.print("Tensor normalized in", ("%.5f" % (time.time() - timestamp)), "s")
 
 # Step 6: Dump embeddings to file
-print_log("Dumping embeddings on disk")
+log.print("Dumping embeddings on disk")
 embeddings.dump(
     args.output+'embeddings-' + str(embeddings.size) + '-' + get_num_stems_str(args.iterations) + '.tsv',
     norm_tensor,
     dictionary
 )
 
-print_log("Waiting for evaluation dumping to finish...")
+log.print("Waiting for evaluation dumping to finish...")
 control_evaluation(tasks)
-print_log("Done")
+log.print("Done")
 log.close()
