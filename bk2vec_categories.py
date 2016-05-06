@@ -1,20 +1,19 @@
 from __future__ import absolute_import
 from __future__ import print_function
 
-import math
-import os
-
 from params import TEXTS
 from params import CATEGORIES_NOTOKEN
 from params import CATEGORIES_TOKEN
 
+from bk2vec.evaluation import *
 from bk2vec.arguments import Arguments
 from bk2vec.embeddings import Embeddings
 from bk2vec.tftextreader import *
 from bk2vec.textreader import build_pages
-from bk2vec.evaluation import *
 from bk2vec.utils import Log
 
+import math
+import os
 import tensorflow as tf
 
 args = Arguments().show_args().args
@@ -66,6 +65,8 @@ del evaluation
 vocabulary_size = len(dictionary)
 log.print('Vocabulary size: ', vocabulary_size)
 
+similarity = WordSimilarity.from_file("datasets/combined.csv", dictionary.dict)
+log.print("Similarity pairs loaded")
 
 class Pages:
     def __init__(self, pages):
@@ -116,6 +117,7 @@ graph = tf.Graph()
 
 with graph.as_default():
     embeddings = Embeddings(vocabulary_size, args.embeddings_size)
+    similarity.register_op(embeddings.tensor())
 
     # Input data.
     train_inputs, train_labels = text_reader.get_reading_ops()
@@ -200,8 +202,8 @@ class TrainingWorker(Thread):
             count += 1
             writer.add_summary(summary, step)
 
-            if count % 2000 == 0:
-                average_loss /= 2000
+            if count % 4000 == 0:
+                average_loss /= 4000
                 log.print("Average loss at step "+get_num_stems_str(step)+":", average_loss)
                 average_loss = 0
 
@@ -224,6 +226,7 @@ with tf.Session(graph=graph) as session:
         workers.append(worker)
     log.print("Started", proc_threads, "worker threads")
 
+    show = 0
     while len(workers) > 0:
         filtered = list()
         for worker in workers:
@@ -234,6 +237,13 @@ with tf.Session(graph=graph) as session:
         newstep = global_step.eval(session)
         log.print(newstep, "steps processed ("+str((newstep-step)/20)+" steps/s)")
         step = newstep
+
+        show += 1
+        pearson, spearman, sim_summary = similarity.calculate_similarity(session)
+        writer.add_summary(sim_summary, newstep)
+        if show % 20 == 0:
+            log.print("Pearson:", pearson)
+            log.print("Spearman:", spearman)
 
     coord.request_stop()
     coord.join(threads)

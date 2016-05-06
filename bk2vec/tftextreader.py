@@ -11,7 +11,7 @@ DEFAULT_BATCH_SIZE = 256
 DICTIONARY_THRESHOLD = 2
 
 
-class TextReader():
+class TextReader:
     def __init__(self, filename, window_size, threads=8, batch_size=DEFAULT_BATCH_SIZE):
         print("Text reader initialized with threads ("+str(threads)+"), batch size ("+str(batch_size)+")")
         self.filename = filename
