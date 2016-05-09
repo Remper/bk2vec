@@ -184,13 +184,16 @@ with graph.as_default():
 
     # Construct the SGD optimizer using a learning rate of 1.0.
     loss_summary = tf.scalar_summary("joint_loss", joint_loss)
-    optimizer = tf.train.GradientDescentOptimizer(0.15, name="joint_objective").minimize(joint_loss, global_step=global_step)
+    learning_rate = tf.train.exponential_decay(0.5, global_step,
+                                               100000, 0.96, staircase=True)
+    optimizer = tf.train.GradientDescentOptimizer(learning_rate, name="joint_objective").minimize(joint_loss, global_step=global_step)
     merged = tf.merge_all_summaries()
 
 
 class TrainingWorker(Thread):
-    def __init__(self, iterations, session, writer):
+    def __init__(self, idx, iterations, session, writer):
         Thread.__init__(self)
+        self._idx = idx
         self._iterations = iterations
         self._session = session
         self._writer = writer
@@ -199,6 +202,7 @@ class TrainingWorker(Thread):
         step = global_step.eval(self._session)
         average_loss = 0
         count = 0
+        last_count = 0
         while step < self._iterations:
             categories = [0]
             category_indexes = [0]
@@ -209,11 +213,16 @@ class TrainingWorker(Thread):
             )
             average_loss += loss_val
             count += 1
-            writer.add_summary(summary, step)
+            if self._iterations > 5000000:
+                if count % int(math.log(self._iterations)) == 0:
+                    writer.add_summary(summary, step)
+            else:
+                writer.add_summary(summary, step)
 
-            if count % 4000 == 0:
-                average_loss /= 4000
-                log.print("Average loss at step "+get_num_stems_str(step)+":", average_loss)
+            if count % 4000 == 0 and (count // 4000) % proc_threads == self._idx:
+                average_loss /= count - last_count
+                log.print("[Worker "+str(self._idx)+"] Average loss at step "+get_num_stems_str(step)+":", average_loss)
+                last_count = count
                 average_loss = 0
 
 # Step 5: Begin training.
@@ -229,8 +238,8 @@ with tf.Session(graph=graph) as session:
     step = 0
     pages = Pages(pages)
     workers = list()
-    for _ in range(proc_threads):
-        worker = TrainingWorker(args.iterations, session, writer)
+    for idx in range(proc_threads):
+        worker = TrainingWorker(idx, args.iterations, session, writer)
         worker.start()
         workers.append(worker)
     log.print("Started", proc_threads, "worker threads")
@@ -248,16 +257,23 @@ with tf.Session(graph=graph) as session:
         step = newstep
 
         show += 1
+        if show % 10 == 0:
+            batch, examples, filtered_examples = session.run(text_reader.get_debug_op())
+            print("Batch resolved: ", " ".join([dictionary.rev_dict[ele] for ele in batch[-20:]]))
+            #print("Batch: ", batch.shape, batch[-20])
+            #print("Examples: ", examples.shape, examples[-50:])
+            #print("Filtered examples: ", filtered_examples.shape, filtered_examples[-50:])
+
         pearson, spearman, sim_summary = wordsim353.calculate_similarity(session)
         writer.add_summary(sim_summary, newstep)
         if show % 20 == 0:
-            log.print("WordSim-353 Pearson:", pearson)
-            log.print("WordSim-353 Spearman:", spearman)
+            log.print("WordSim-353 Pearson: ", "%.3f" % pearson)
+            log.print("WordSim-353 Spearman:", "%.3f" % spearman)
         pearson, spearman, sim_summary = simlex999.calculate_similarity(session)
         writer.add_summary(sim_summary, newstep)
         if show % 20 == 0:
-            log.print("SimLex-999 Pearson:", pearson)
-            log.print("SimLex-999 Spearman:", spearman)
+            log.print("SimLex-999 Pearson: ", "%.3f" % pearson)
+            log.print("SimLex-999 Spearman:", "%.3f" % spearman)
 
     coord.request_stop()
     coord.join(threads)

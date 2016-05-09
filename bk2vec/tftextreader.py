@@ -8,25 +8,34 @@ import tensorflow as tf
 from bk2vec.dictionary import Dictionary
 
 DEFAULT_BATCH_SIZE = 256
-DICTIONARY_THRESHOLD = 2
-
+DEFAULT_THREADS = 2
+DEFAULT_READERS = 2
+DICTIONARY_THRESHOLD = 4
 
 class TextReader:
-    def __init__(self, filename, window_size, threads=8, batch_size=DEFAULT_BATCH_SIZE):
+    def __init__(self, filename, window_size, threads=DEFAULT_THREADS, batch_size=DEFAULT_BATCH_SIZE):
         print("Text reader initialized with threads ("+str(threads)+"), batch size ("+str(batch_size)+")")
         self.filename = filename
         self._window_size = window_size
         self._reading_op = None
         self._threads = threads
         self._batch_size = batch_size
+        self._debug_op = None
 
     def get_reading_ops(self):
         if self._reading_op is None:
             filename_queue = tf.train.string_input_producer([self.filename])
-            reader = tf.FixedLengthRecordReader(record_bytes=4 * self._batch_size)
+            reader = tf.FixedLengthRecordReader(record_bytes=4*DEFAULT_BATCH_SIZE)
             key, value = reader.read(filename_queue)
 
-            batch = tf.decode_raw(value, tf.int32)
+            # Converting bytes into int32s and stating that this is a scalar
+            words = tf.reshape(tf.decode_raw(value, tf.int32), [-1])
+            batch = tf.train.batch([words],
+                                   batch_size=self._batch_size,
+                                   num_threads=DEFAULT_READERS,
+                                   enqueue_many=True,
+                                   capacity=self._batch_size*10,
+                                   name="word_buffer")
             expanded_batch = tf.expand_dims(batch, 1)
             examples = list()
 
@@ -37,15 +46,27 @@ class TextReader:
                 append_example(tf.slice(tf.pad(batch, [[window, 0]]), [0], [self._batch_size]), '-p'+str(window))
                 append_example(tf.pad(tf.slice(batch, [window], [self._batch_size - window]), [[0, window]]), '-m'+str(window))
             examples = tf.concat(0, examples)
-            examples = tf.train.shuffle_batch([examples],
-                                              batch_size=DEFAULT_BATCH_SIZE,
+
+            # Filtering zeros
+            not_zeros, _ = tf.unique(tf.squeeze(tf.slice(tf.where(tf.not_equal(examples[:, 1], 0)), [0, 0], [-1, 1])))
+            filtered_examples = tf.gather(examples, not_zeros)
+            self._debug_op = [batch, examples, filtered_examples]
+
+            examples = tf.train.shuffle_batch([filtered_examples],
+                                              batch_size=self._batch_size,
                                               num_threads=self._threads,
-                                              capacity=DEFAULT_BATCH_SIZE*self._threads*3,
-                                              min_after_dequeue=DEFAULT_BATCH_SIZE*self._threads,
-                                              enqueue_many=True)
+                                              capacity=self._batch_size*self._threads*5,
+                                              min_after_dequeue=self._batch_size*self._threads,
+                                              enqueue_many=True,
+                                              name="batch_buffer")
             examples = tf.split(1, 2, examples)
             self._reading_op = examples
         return self._reading_op
+
+    def get_debug_op(self):
+        if self._debug_op is None:
+            raise Exception("Debug operation wasn't initialized")
+        return self._debug_op
 
     def text2bin(self, source, threshold=None):
         dictionary, counts = TextReader.build_dictionary(source, threshold)
@@ -71,6 +92,11 @@ class TextReader:
                     print("  ", str(processed // 1000000) + "m words parsed",
                           ", time:", ("%.3f" % (time.time() - timestamp)) + "s)")
                     timestamp = time.time()
+            if processed % DEFAULT_BATCH_SIZE != 0:
+                print("  Padding stream for ", DEFAULT_BATCH_SIZE - processed % DEFAULT_BATCH_SIZE, "words")
+                while processed % DEFAULT_BATCH_SIZE != 0:
+                    file.write(struct.pack('=l', 0))
+                    processed += 1
         return dictionary
 
     def store_dictionary(self, dictionary):
@@ -131,10 +157,10 @@ class TextReader:
                 counts[word] += 1
                 continue
             counts[word] = 1
-        print("Parsing finished")
+        print("  Parsing finished")
         if threshold is None:
             threshold = DICTIONARY_THRESHOLD
-        print("Removing a tail and assembling a dictionary (Threshold: ", threshold, ")")
+        print("  Removing a tail and assembling a dictionary (Threshold:", threshold, ")")
         filtered_dictionary = Dictionary()
         processed = 0
         timestamp = time.time()

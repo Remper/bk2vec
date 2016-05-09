@@ -104,7 +104,8 @@ class WordSimilarity:
                     print("Word", row[1], "not in dictionary")
                     continue
                 pairs.append([dictionary[row[0]], dictionary[row[1]]])
-                labels.append(10 - float(row[3]))
+                value = 10 - float(row[3])
+                labels.append(value)
         return WordSimilarity("simlex999", pairs, labels)
 
 
