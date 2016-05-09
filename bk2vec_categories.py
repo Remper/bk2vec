@@ -65,7 +65,8 @@ del evaluation
 vocabulary_size = len(dictionary)
 log.print('Vocabulary size: ', vocabulary_size)
 
-similarity = WordSimilarity.from_file("datasets/combined.csv", dictionary.dict)
+wordsim353 = WordSimilarity.wordsim353("datasets/combined.csv", dictionary.dict)
+simlex999 = WordSimilarity.simlex999("datasets/SimLex-999.txt", dictionary.dict)
 log.print("Similarity pairs loaded")
 
 class Pages:
@@ -117,7 +118,8 @@ graph = tf.Graph()
 
 with graph.as_default():
     embeddings = Embeddings(vocabulary_size, args.embeddings_size)
-    similarity.register_op(embeddings.tensor())
+    wordsim353.register_op(embeddings.tensor())
+    simlex999.register_op(embeddings.tensor())
 
     # Input data.
     train_inputs, train_labels = text_reader.get_reading_ops()
@@ -131,9 +133,16 @@ with graph.as_default():
 
     # Construct the variables for the NCE loss
     nce_weights = tf.Variable(
-        tf.truncated_normal([embeddings.vocabulary_size, embeddings.size],
-                            stddev=1.0 / math.sqrt(embeddings.size)), name="NCE_weights")
-    nce_biases = tf.Variable(tf.zeros([vocabulary_size]), name="NCE_biases")
+        tf.truncated_normal(
+            [embeddings.vocabulary_size, embeddings.size],
+            stddev=1.0 / math.sqrt(embeddings.size)
+        ), name="NCE_weights")
+    nce_biases = tf.Variable(
+        tf.truncated_normal(
+            [embeddings.vocabulary_size],
+            stddev=1.0 / math.sqrt(embeddings.vocabulary_size)
+        ), name="NCE_biases")
+
 
     # Compute the average NCE loss for the batch.
     # tf.nce_loss automatically draws a new sample of the negative labels each
@@ -171,11 +180,11 @@ with graph.as_default():
             category_loss = tf.mul(tf.constant(10.0), category_loss, name="category_contrib_coeff")
             category_loss_summary = tf.scalar_summary("category_loss", category_loss)
 
-        joint_loss = tf.add(loss, category_loss, name="joint_loss")
+        joint_loss = tf.clip_by_value(tf.add(loss, category_loss, name="joint_loss"), 1e-10, args.num_sampled*10)
 
     # Construct the SGD optimizer using a learning rate of 1.0.
     loss_summary = tf.scalar_summary("joint_loss", joint_loss)
-    optimizer = tf.train.GradientDescentOptimizer(1.0, name="joint_objective").minimize(joint_loss, global_step=global_step)
+    optimizer = tf.train.GradientDescentOptimizer(0.15, name="joint_objective").minimize(joint_loss, global_step=global_step)
     merged = tf.merge_all_summaries()
 
 
@@ -239,11 +248,16 @@ with tf.Session(graph=graph) as session:
         step = newstep
 
         show += 1
-        pearson, spearman, sim_summary = similarity.calculate_similarity(session)
+        pearson, spearman, sim_summary = wordsim353.calculate_similarity(session)
         writer.add_summary(sim_summary, newstep)
         if show % 20 == 0:
-            log.print("Pearson:", pearson)
-            log.print("Spearman:", spearman)
+            log.print("WordSim-353 Pearson:", pearson)
+            log.print("WordSim-353 Spearman:", spearman)
+        pearson, spearman, sim_summary = simlex999.calculate_similarity(session)
+        writer.add_summary(sim_summary, newstep)
+        if show % 20 == 0:
+            log.print("SimLex-999 Pearson:", pearson)
+            log.print("SimLex-999 Spearman:", spearman)
 
     coord.request_stop()
     coord.join(threads)
