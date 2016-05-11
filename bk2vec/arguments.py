@@ -2,7 +2,7 @@ from __future__ import absolute_import
 from __future__ import print_function
 
 import argparse
-
+import random
 
 class AbstractArguments():
     def __init__(self, parser):
@@ -34,6 +34,7 @@ class Arguments(AbstractArguments):
         self.args.num_sampled = int(self.args.num_sampled)
         self.args.window_size = int(self.args.window_size)
         self.args.threads = int(self.args.threads)
+        self.args.seed = int(self.args.seed)
         self.args.margin = float(self.args.margin)
         self.args.clean = bool(self.args.clean)
         self.args.notoken = bool(self.args.notoken)
@@ -57,6 +58,7 @@ class Arguments(AbstractArguments):
                             help='Num threads (default {0})'.format(Arguments.DEFAULT_NUM_THREADS), metavar='#')
         parser.add_argument('--num_sampled', default=Arguments.DEFAULT_NUM_SAMPLED,
                             help='Num sampled (default {0})'.format(Arguments.DEFAULT_NUM_SAMPLED), metavar='#')
+        parser.add_argument('--seed', default=random.randint(0, 2147483647), help='Seed (default random)', metavar='#')
         parser.add_argument('--margin', default=Arguments.DEFAULT_MARGIN, metavar='#',
                             help='Margin for category objective (default {0})'.format(Arguments.DEFAULT_MARGIN))
         parser.add_argument('--mode', default=Arguments.DEFAULT_MODE, metavar='#',

@@ -22,6 +22,24 @@ def synchronized(lock):
     return wrap
 
 
+def get_num_stems_str(num_steps):
+    letter = ''
+    divider = 1
+    mappings = {
+        'b': 1000000000,
+        'm': 1000000,
+        'k': 1000
+    }
+    for mapping in mappings:
+        if num_steps > mappings[mapping] and mappings[mapping] > divider:
+            letter = mapping
+            divider = mappings[mapping]
+    if num_steps % divider == 0:
+        return str(num_steps // divider) + letter
+    else:
+        return "{:.1f}".format(float(num_steps) / divider) + letter
+
+
 class Log:
     def __init__(self, args):
         self._log = None

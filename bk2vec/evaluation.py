@@ -13,6 +13,53 @@ import numpy as np
 import tensorflow as tf
 
 
+class Analogy:
+    def __init__(self, entries):
+        self._entries = entries
+        self._op = None
+
+    def register_op(self, embeddings):
+        if self._op is None:
+            with tf.name_scope("analogy_calculation"):
+                input_op = tf.constant(self._entries, name="analogy_entries")
+                self._op = tf.gather(embeddings, input_op)
+        return self._op
+
+    def calculate_analogy(self, session):
+        if self._op is None:
+            print("Operation hasn't been registered. Ignoring")
+            return 0
+
+        vectors = self._op.eval(session=session)
+        distances = np.diag(cdist(vectors[:, 1] - vectors[:, 0], vectors[:, 3] - vectors[:, 2]))
+        score = distances.sum()
+        summary = tf.Summary()
+        value = summary.value.add()
+        value.tag = "analogy/score"
+        value.simple_value = score
+        return summary, score
+
+    @staticmethod
+    def from_file(source, dictionary):
+        entries = list()
+        with open(source, 'rb') as csvfile:
+            reader = csv.reader(csvfile, delimiter=' ', quoting=csv.QUOTE_NONE, quotechar='')
+            count = 0
+            for row in reader:
+                count += 1
+                if count == 1 or row[0].startswith(':'):
+                    continue
+                if len(row) != 4:
+                    print("Inconsistent file: ", " ".join(row))
+                    continue
+                for word in row:
+                    if word not in dictionary:
+                        print("Word", word, "not in dictionary")
+                        continue
+                entries.append([dictionary[word] for word in row])
+        return Analogy(entries)
+
+
 class WordSimilarity:
     def __init__(self, name, pairs, labels):
         self._pairs = np.array(pairs)
@@ -67,7 +114,6 @@ class WordSimilarity:
             for row in reader:
                 count += 1
                 if count == 1:
-                    print("Skipping header")
                     continue
                 if len(row) != 3:
                     print("Inconsistent file")
@@ -92,7 +138,6 @@ class WordSimilarity:
             for row in reader:
                 count += 1
                 if count == 1:
-                    print("Skipping header")
                     continue
                 if len(row) != 10:
                     print("Inconsistent file")

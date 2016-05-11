@@ -10,7 +10,7 @@ from bk2vec.arguments import Arguments
 from bk2vec.embeddings import Embeddings
 from bk2vec.tftextreader import *
 from bk2vec.textreader import build_pages
-from bk2vec.utils import Log
+from bk2vec.utils import *
 
 import math
 import os
@@ -24,6 +24,7 @@ if pre_thread_count == 0:
     pre_thread_count = 1
 proc_threads = args.threads - pre_thread_count
 text_reader = TextReader(args.output+'text.bin', args.window_size, pre_thread_count, args.batch_size)
+tf.set_random_seed(args.seed)
 
 log = Log(args)
 
@@ -36,20 +37,6 @@ if args.notoken:
     CATEGORIES = CATEGORIES_NOTOKEN
 else:
     CATEGORIES = CATEGORIES_TOKEN
-
-def get_num_stems_str(num_steps):
-    letter = ''
-    divider = 1
-    if num_steps > 1000000:
-        letter = 'm'
-        divider = 1000000
-    elif num_steps > 1000:
-        letter = 'k'
-        divider = 1000
-    if num_steps % divider == 0:
-        return str(num_steps // divider) + letter
-    else:
-        return "{:.1f}".format(float(num_steps) / divider) + letter
 
 if not os.path.exists(text_reader.filename):
     dictionary = text_reader.text2bin(TEXTS)
@@ -68,6 +55,8 @@ log.print('Vocabulary size: ', vocabulary_size)
 wordsim353 = WordSimilarity.wordsim353("datasets/combined.csv", dictionary.dict)
 simlex999 = WordSimilarity.simlex999("datasets/SimLex-999.txt", dictionary.dict)
 log.print("Similarity pairs loaded")
+analogy = Analogy.from_file("datasets/questions-words.txt", dictionary.dict)
+log.print("Analogy entries loaded")
 
 class Pages:
     def __init__(self, pages):
@@ -120,6 +109,7 @@ with graph.as_default():
     embeddings = Embeddings(vocabulary_size, args.embeddings_size)
     wordsim353.register_op(embeddings.tensor())
     simlex999.register_op(embeddings.tensor())
+    analogy.register_op(embeddings.tensor())
 
     # Input data.
     train_inputs, train_labels = text_reader.get_reading_ops()
@@ -184,9 +174,10 @@ with graph.as_default():
 
     # Construct the SGD optimizer using a learning rate of 1.0.
     loss_summary = tf.scalar_summary("joint_loss", joint_loss)
-    learning_rate = tf.train.exponential_decay(0.5, global_step,
-                                               100000, 0.96, staircase=True)
-    optimizer = tf.train.GradientDescentOptimizer(learning_rate, name="joint_objective").minimize(joint_loss, global_step=global_step)
+    learning_rate = 1.0
+    #learning_rate = tf.train.exponential_decay(1.0, global_step,
+    #                                           150000, 0.9, staircase=True)
+    optimizer = tf.train.AdagradOptimizer(learning_rate, use_locking=True, name="joint_objective").minimize(joint_loss, global_step=global_step)
     merged = tf.merge_all_summaries()
 
 
@@ -245,6 +236,7 @@ with tf.Session(graph=graph) as session:
     log.print("Started", proc_threads, "worker threads")
 
     show = 0
+    timeadj = 0
     while len(workers) > 0:
         filtered = list()
         for worker in workers:
@@ -253,7 +245,9 @@ with tf.Session(graph=graph) as session:
         workers = filtered
         time.sleep(20)
         newstep = global_step.eval(session)
-        log.print(newstep, "steps processed ("+str((newstep-step)/20)+" steps/s)")
+        log.print(newstep,
+                  "steps processed ("+str(int(float(newstep-step)/(20+timeadj)))+" steps/s,",
+                  get_num_stems_str(text_reader.get_reader_stats(session)), "words)")
         step = newstep
 
         show += 1
@@ -264,16 +258,29 @@ with tf.Session(graph=graph) as session:
             #print("Examples: ", examples.shape, examples[-50:])
             #print("Filtered examples: ", filtered_examples.shape, filtered_examples[-50:])
 
+        timestamp = time.time()
         pearson, spearman, sim_summary = wordsim353.calculate_similarity(session)
         writer.add_summary(sim_summary, newstep)
         if show % 20 == 0:
             log.print("WordSim-353 Pearson: ", "%.3f" % pearson)
             log.print("WordSim-353 Spearman:", "%.3f" % spearman)
+        wordsim353_time = time.time() - timestamp
+        timestamp = time.time()
         pearson, spearman, sim_summary = simlex999.calculate_similarity(session)
         writer.add_summary(sim_summary, newstep)
         if show % 20 == 0:
             log.print("SimLex-999 Pearson: ", "%.3f" % pearson)
             log.print("SimLex-999 Spearman:", "%.3f" % spearman)
+        simlex999_time = time.time() - timestamp
+        timestamp = time.time()
+        if show % 30 == 0:
+            summary, score = analogy.calculate_analogy(session)
+            writer.add_summary(sim_summary, newstep)
+            log.print("Analogy score: ", "%.3f" % score)
+        analogy_time = time.time() - timestamp
+        timeadj = wordsim353_time + simlex999_time + analogy_time
+        if timeadj > 10:
+            log.print("Evaluation times: ", wordsim353_time, simlex999_time, analogy_time, "("+str(int(timeadj))+"s total)")
 
     coord.request_stop()
     coord.join(threads)

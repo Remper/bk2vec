@@ -21,11 +21,13 @@ class TextReader:
         self._threads = threads
         self._batch_size = batch_size
         self._debug_op = None
+        self._reader_stats = None
 
     def get_reading_ops(self):
         if self._reading_op is None:
             filename_queue = tf.train.string_input_producer([self.filename])
             reader = tf.FixedLengthRecordReader(record_bytes=4*DEFAULT_BATCH_SIZE)
+            self._reader_stats = reader.num_records_produced()
             key, value = reader.read(filename_queue)
 
             # Converting bytes into int32s and stating that this is a scalar
@@ -62,6 +64,11 @@ class TextReader:
             examples = tf.split(1, 2, examples)
             self._reading_op = examples
         return self._reading_op
+
+    def get_reader_stats(self, session):
+        if self._reader_stats is None:
+            raise Exception("Reader stats operation wasn't initialized")
+        return self._reader_stats.eval(session=session)*DEFAULT_BATCH_SIZE
 
     def get_debug_op(self):
         if self._debug_op is None:
