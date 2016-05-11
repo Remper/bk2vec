@@ -38,6 +38,7 @@ class Arguments(AbstractArguments):
         self.args.margin = float(self.args.margin)
         self.args.clean = bool(self.args.clean)
         self.args.notoken = bool(self.args.notoken)
+        self.args.blacklist = bool(self.args.blacklist)
         if self.args.output != '' and not self.args.output.endswith('/'):
             self.args.output += '/'
 
@@ -58,6 +59,8 @@ class Arguments(AbstractArguments):
                             help='Num threads (default {0})'.format(Arguments.DEFAULT_NUM_THREADS), metavar='#')
         parser.add_argument('--num_sampled', default=Arguments.DEFAULT_NUM_SAMPLED,
                             help='Num sampled (default {0})'.format(Arguments.DEFAULT_NUM_SAMPLED), metavar='#')
+        parser.add_argument('--blacklist', default=False, action='store_true',
+                            help='Filter out words using the blacklist (works only on clean run')
         parser.add_argument('--seed', default=random.randint(0, 2147483647), help='Seed (default random)', metavar='#')
         parser.add_argument('--margin', default=Arguments.DEFAULT_MARGIN, metavar='#',
                             help='Margin for category objective (default {0})'.format(Arguments.DEFAULT_MARGIN))

@@ -75,8 +75,8 @@ class TextReader:
             raise Exception("Debug operation wasn't initialized")
         return self._debug_op
 
-    def text2bin(self, source, threshold=None):
-        dictionary, counts = TextReader.build_dictionary(source, threshold)
+    def text2bin(self, source, blacklist=False, threshold=None):
+        dictionary, counts = TextReader.build_dictionary(source, blacklist_enabled=blacklist, threshold=threshold)
         print("Dumping counts")
         timestamp = time.time()
         with open(self.filename + '_counts.tsv', 'wb') as file:
@@ -148,7 +148,13 @@ class TextReader:
         file.close()
 
     @staticmethod
-    def build_dictionary(source, threshold=None):
+    def build_dictionary(source, blacklist_enabled=False, threshold=None):
+        print("Loading blacklist")
+        blacklist = list()
+        with open('datasets/blacklist.txt') as file:
+            for row in file:
+                blacklist.append(row.strip())
+        print("Blacklist contains", len(blacklist), "words")
         print("Building word frequency list")
         processed = 0
         counts = dict()
@@ -177,6 +183,8 @@ class TextReader:
                 print("  ", str(processed // 1000000) + "m words parsed,",
                       "(" + ("%.3f" % (time.time() - timestamp)) + "s)")
                 timestamp = time.time()
+            if blacklist_enabled and word in blacklist:
+                continue
             if counts[word] >= DICTIONARY_THRESHOLD:
                 filtered_dictionary.add_word(word)
         return filtered_dictionary, counts

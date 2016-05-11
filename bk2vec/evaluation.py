@@ -31,8 +31,16 @@ class Analogy:
             return 0
 
         vectors = self._op.eval(session=session)
-        distances = np.diag(cdist(vectors[:, 1] - vectors[:, 0], vectors[:, 3] - vectors[:, 2]))
-        score = distances.sum()
+        analogy1 = vectors[:, 1] - vectors[:, 0]
+        analogy2 = vectors[:, 3] - vectors[:, 2]
+        previous = 0
+        score = 0
+        for next in range(100, analogy1.shape[0], 100):
+            score += np.diag(cdist(analogy1[previous:next], analogy2[previous:next])).sum()
+            previous = next
+        if previous < analogy1.shape[0]:
+            score += np.diag(cdist(analogy1[previous:], analogy2[previous:])).sum()
+        score /= analogy1.shape[0]
         summary = tf.Summary()
         value = summary.value.add()
         value.tag = "analogy/score"

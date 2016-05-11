@@ -39,7 +39,7 @@ else:
     CATEGORIES = CATEGORIES_TOKEN
 
 if not os.path.exists(text_reader.filename):
-    dictionary = text_reader.text2bin(TEXTS)
+    dictionary = text_reader.text2bin(TEXTS, blacklist=args.blacklist)
 else:
     dictionary = text_reader.restore_dictionary()
 
@@ -212,7 +212,8 @@ class TrainingWorker(Thread):
 
             if count % 4000 == 0 and (count // 4000) % proc_threads == self._idx:
                 average_loss /= count - last_count
-                log.print("[Worker "+str(self._idx)+"] Average loss at step "+get_num_stems_str(step)+":", average_loss)
+                log.print("[Worker "+str(self._idx)+"] Average loss at step "+get_num_stems_str(step)+":",
+                          "%.5f" % average_loss)
                 last_count = count
                 average_loss = 0
 
@@ -273,14 +274,18 @@ with tf.Session(graph=graph) as session:
             log.print("SimLex-999 Spearman:", "%.3f" % spearman)
         simlex999_time = time.time() - timestamp
         timestamp = time.time()
-        if show % 30 == 0:
+        if show % 10 == 0:
             summary, score = analogy.calculate_analogy(session)
             writer.add_summary(sim_summary, newstep)
             log.print("Analogy score: ", "%.3f" % score)
         analogy_time = time.time() - timestamp
         timeadj = wordsim353_time + simlex999_time + analogy_time
         if timeadj > 10:
-            log.print("Evaluation times: ", wordsim353_time, simlex999_time, analogy_time, "("+str(int(timeadj))+"s total)")
+            log.print("Evaluation times: ",
+                      "%.2f" % wordsim353_time,
+                      "%.2f" % simlex999_time,
+                      "%.2f" % analogy_time,
+                      "("+str(int(timeadj))+"s total)")
 
     coord.request_stop()
     coord.join(threads)
