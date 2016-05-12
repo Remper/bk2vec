@@ -93,11 +93,14 @@ class TextReader:
         timestamp = time.time()
         with open(self.filename, 'wb') as file:
             for word in TextReader.words(source):
-                file.write(struct.pack('=l', dictionary[word]))
+                if word not in dictionary.dict:
+                    continue
+                idx = dictionary.dict[word]
+                file.write(struct.pack('=l', idx))
                 processed += 1
                 if processed % 100000000 == 0:
-                    print("  ", str(processed // 1000000) + "m words parsed",
-                          ", time:", ("%.3f" % (time.time() - timestamp)) + "s)")
+                    print("  ", str(processed // 1000000) + "m words parsed,",
+                          "time:", ("%.3f" % (time.time() - timestamp)) + "s")
                     timestamp = time.time()
             if processed % DEFAULT_BATCH_SIZE != 0:
                 print("  Padding stream for ", DEFAULT_BATCH_SIZE - processed % DEFAULT_BATCH_SIZE, "words")
@@ -164,7 +167,7 @@ class TextReader:
             processed += 1
             if processed % 100000000 == 0:
                 print("  ", str(processed // 1000000) + "m words parsed (last:", word, ", dict size:", len(counts),
-                      ", time:", ("%.3f" % (time.time() - timestamp)) + "s)")
+                      ", time:", ("%.3f" % (time.time() - timestamp)) + "s")
                 timestamp = time.time()
             if word in counts:
                 counts[word] += 1
@@ -181,7 +184,7 @@ class TextReader:
             processed += 1
             if processed % 1000000 == 0:
                 print("  ", str(processed // 1000000) + "m words parsed,",
-                      "(" + ("%.3f" % (time.time() - timestamp)) + "s)")
+                      "time:", ("%.3f" % (time.time() - timestamp)) + "s")
                 timestamp = time.time()
             if blacklist_enabled and word in blacklist:
                 continue
