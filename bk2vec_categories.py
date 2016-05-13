@@ -276,7 +276,7 @@ with tf.Session(graph=graph) as session:
         timestamp = time.time()
         if show % 10 == 0:
             summary, score = analogy.calculate_analogy(session)
-            writer.add_summary(sim_summary, newstep)
+            writer.add_summary(summary, newstep)
             log.print("Analogy score: ", "%.3f" % score)
         analogy_time = time.time() - timestamp
         timeadj = wordsim353_time + simlex999_time + analogy_time
