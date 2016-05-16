@@ -44,19 +44,27 @@ else:
     dictionary = text_reader.restore_dictionary()
 
 tasks = list()
+old_vocabulary_size = len(dictionary)
 pages, evaluation = build_pages(CATEGORIES, dictionary.dict, dictionary.rev_dict)
-log.print('Started storing test and training set')
-tasks.append(dump_evaluation(evaluation, "test", folder=args.output))
-tasks.append(dump_evaluation(pages, "train", folder=args.output))
-del evaluation
 vocabulary_size = len(dictionary)
 log.print('Vocabulary size: ', vocabulary_size)
+if not args.clean:
+    log.print('Started storing test and training set')
+    tasks.append(dump_evaluation(evaluation, "test", folder=args.output))
+    tasks.append(dump_evaluation(pages, "train", folder=args.output))
+    difference = vocabulary_size - old_vocabulary_size
+    if difference > 0:
+        log.print('Added', difference, 'words. Updating dictionary')
+        log.print('Updating dictionary')
+        text_reader.store_dictionary(dictionary)
+del evaluation
 
 wordsim353 = WordSimilarity.wordsim353("datasets/combined.csv", dictionary.dict)
 simlex999 = WordSimilarity.simlex999("datasets/SimLex-999.txt", dictionary.dict)
 log.print("Similarity pairs loaded")
 analogy = Analogy.from_file("datasets/questions-words.txt", dictionary.dict)
 log.print("Analogy entries loaded")
+
 
 class Pages:
     def __init__(self, pages):
@@ -86,7 +94,11 @@ class Pages:
                 for ele in self._pages[page]:
                     batch_indexes.append(page)
                     batch.append(ele)
-        return batch_indexes, batch
+        # Batch should never be empty
+        if len(batch) == 0:
+            batch.append(0)
+            batch_indexes.append(0)
+        return np.array(batch_indexes, dtype=np.int32), np.array(batch, dtype=np.int32)
 
 
 # Step 4: Build and train a skip-gram model.
@@ -114,8 +126,6 @@ with graph.as_default():
     # Input data.
     train_inputs, train_labels = text_reader.get_reading_ops()
     train_inputs = tf.squeeze(train_inputs)
-    train_categories = tf.placeholder(tf.int32, shape=[None], name="train_categories")
-    train_category_indexes = tf.placeholder(tf.int32, shape=[None], name="train_category_indexes")
     global_step = tf.Variable(0, name='global_step', trainable=False)
 
     # Look up embeddings for inputs.
@@ -149,6 +159,12 @@ with graph.as_default():
 
     if not args.clean:
         # Recalculating centroids for words in a batch
+        train_category_indexes, train_categories = tf.py_func(
+            lambda batch, labels: pages.generate_batch(batch, labels),
+            [train_inputs, train_labels], [tf.int32, tf.int32]
+        )
+        #train_categories = tf.to_int32(train_categories)
+        #train_category_indexes = tf.to_int32(train_category_indexes)
         with tf.name_scope("category_distances"):
             # Calculating distances towards category tokens
             category_distances = matrix_distance(
@@ -167,7 +183,7 @@ with graph.as_default():
         with tf.name_scope("category_loss"):
             # Building category objective which is average distance to word centroid
             category_loss = tf.reduce_mean(category_distances)
-            category_loss = tf.mul(tf.constant(10.0), category_loss, name="category_contrib_coeff")
+            #category_loss = tf.mul(tf.constant(10.0), category_loss, name="category_contrib_coeff")
             category_loss_summary = tf.scalar_summary("category_loss", category_loss)
 
         joint_loss = tf.clip_by_value(tf.add(loss, category_loss, name="joint_loss"), 1e-10, args.num_sampled*10)
@@ -195,12 +211,8 @@ class TrainingWorker(Thread):
         count = 0
         last_count = 0
         while step < self._iterations:
-            categories = [0]
-            category_indexes = [0]
-            feed_dict = {train_categories: categories, train_category_indexes: category_indexes}
             step, summary, _, loss_val = self._session.run(
-                [global_step, merged, optimizer, joint_loss],
-                feed_dict=feed_dict
+                [global_step, merged, optimizer, joint_loss]
             )
             average_loss += loss_val
             count += 1
