@@ -186,7 +186,8 @@ with graph.as_default():
             #category_loss = tf.mul(tf.constant(10.0), category_loss, name="category_contrib_coeff")
             category_loss_summary = tf.scalar_summary("category_loss", category_loss)
 
-        joint_loss = tf.clip_by_value(tf.add(loss, category_loss, name="joint_loss"), 1e-10, args.num_sampled*10)
+        joint_loss = tf.add(loss, category_loss, name="joint_loss")
+    joint_loss = tf.clip_by_value(joint_loss, 1e-10, args.num_sampled*10)
 
     # Construct the SGD optimizer using a learning rate of 1.0.
     loss_summary = tf.scalar_summary("joint_loss", joint_loss)

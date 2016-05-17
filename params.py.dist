@@ -1,0 +1,3 @@
+TEXTS = 'text.csv.gz'
+CATEGORIES_TOKEN = 'token.csv.gz'
+CATEGORIES_NOTOKEN = 'notoken.csv.gz'

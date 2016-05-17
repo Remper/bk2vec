@@ -3,3 +3,4 @@ logs
 *.log
 .Python
 *_pb2.py
+params.py
