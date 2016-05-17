@@ -130,7 +130,7 @@ with graph.as_default():
     global_step = tf.Variable(0, name='global_step', trainable=False)
 
     # Look up embeddings for inputs.
-    embed = tf.nn.embedding_lookup(embeddings.tensor(), train_inputs)
+    embed = tf.gather(embeddings.tensor(), train_inputs)
 
     # Construct the variables for the NCE loss
     nce_weights = tf.Variable(
