@@ -18,13 +18,9 @@ def nce_loss(weights, biases, inputs, labels, num_sampled, num_classes,
              num_true=1,
              sampled_values=None,
              name="nce_loss"):
-    if not isinstance(weights, list):
-        weights = [weights]
-
-    with tf.op_scope(
-                    weights + [biases, inputs, labels], name, "compute_sampled_logits"):
-        if labels.dtype != tf.dtypes.int64:
-            labels = tf.cast(labels, tf.dtypes.int64)
+    with tf.op_scope([weights, biases, inputs, labels], name, "compute_sampled_logits"):
+        if labels.dtype != tf.int64:
+            labels = tf.cast(labels, tf.int64)
         labels_flat = tf.reshape(labels, [-1])
 
         # Sample the negative labels.
