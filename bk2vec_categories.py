@@ -11,6 +11,7 @@ from bk2vec.embeddings import Embeddings
 from bk2vec.tftextreader import *
 from bk2vec.textreader import build_pages
 from bk2vec.utils import *
+from bk2vec.nce_loss import nce_loss
 
 import math
 import os
@@ -149,7 +150,7 @@ with graph.as_default():
     # time we evaluate the loss.
     with tf.name_scope("skipgram_loss"):
         loss = tf.reduce_mean(
-            tf.nn.nce_loss(nce_weights, nce_biases, embed, train_labels, args.num_sampled, embeddings.vocabulary_size)
+            nce_loss(nce_weights, nce_biases, embed, train_labels, args.num_sampled, embeddings.vocabulary_size)
             , name="skipgram_loss"
         )
         #loss = tf.mul(tf.constant(0.1), loss, name="skipgram_contrib_coeff")
