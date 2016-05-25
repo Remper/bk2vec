@@ -11,6 +11,8 @@ import time
 csv.field_size_limit(2147483647)
 
 DICTIONARY_THRESHOLD = 2
+CATEGORIES_FILE = 'datasets/wnCategories.tsv.gz'
+
 
 class TextReader():
     def __init__(self, filename, type='gzip'):
@@ -164,46 +166,58 @@ def build_pages(filename, dictionary, reverse_dictionary):
     category_notfound = 0
     test_set_size = 0
     training_set_size = 0
-    with gzip.open(filename, 'rb') as csvfile:
-        reader = csv.reader(csvfile, delimiter='\t', quoting=csv.QUOTE_NONE, quotechar='')
-        try:
-            for row in reader:
-                page_title = row[0]
-                if page_title not in dictionary:
-                    notfound += 1
-                    continue
-                found += 1
-                if max_pages > 0 and found > max_pages:
-                    break
-                if max_categories_per_page > 0 and len(row) > max_categories_per_page + 1:
-                    row = row[:max_categories_per_page + 1]
-                if found % 1000000 == 0:
-                    print("  " + str(found // 1000000) + "m pages parsed")
-                page_index = dictionary[page_title]
-                if page_index not in pages:
-                    pages[page_index] = list()
-                if page_index not in evaluation:
-                    evaluation[page_index] = list()
-                page_categories = pages[page_index]
-                evaluation_current = evaluation[page_index]
-                for word in row[1:]:
-                    word = word + "_cat"
-                    if word not in dictionary:
-                        dictionary[word] = len(dictionary)
-                        reverse_dictionary[dictionary[word]] = word
-                        category_notfound += 1
-                    category_found += 1
-                    if test_set > 0 and random.random() <= test_set:
-                        test_set_size += 1
-                        evaluation_current.append(dictionary[word])
+    for filename in [CATEGORIES_FILE, filename]:
+        with gzip.open(filename, 'rb') as csvfile:
+            reader = csv.reader(csvfile, delimiter='\t', quoting=csv.QUOTE_NONE, quotechar='')
+            try:
+                for row in reader:
+                    # TODO: standartise this
+                    if filename == CATEGORIES_FILE:
+                        page_title = row[1]
+                        categories = row[2:]
+                        if page_title not in dictionary:
+                            notfound += 1
+                            continue
+                            #dictionary[page_title] = len(dictionary)
+                            #reverse_dictionary[dictionary[page_title]] = page_title
                     else:
-                        training_set_size += 1
-                        page_categories.append(dictionary[word])
-                if len(page_categories) > maxPages:
-                    maxPages = len(page_categories)
-                    maxPagesTitle = page_title
-        except csv.Error:
-            print(u"Dunno why this error happens")
+                        page_title = row[0]
+                        categories = row[1:]
+                        if page_title not in dictionary:
+                            notfound += 1
+                            continue
+                    found += 1
+                    if 0 < max_pages < found:
+                        break
+                    if 0 < max_categories_per_page < len(categories):
+                        categories = categories[:max_categories_per_page]
+                    if found % 1000000 == 0:
+                        print("  " + str(found // 1000000) + "m pages parsed")
+                    page_index = dictionary[page_title]
+                    if page_index not in pages:
+                        pages[page_index] = list()
+                    if page_index not in evaluation:
+                        evaluation[page_index] = list()
+                    page_categories = pages[page_index]
+                    evaluation_current = evaluation[page_index]
+                    for word in categories:
+                        word += "_cat"
+                        if word not in dictionary:
+                            dictionary[word] = len(dictionary)
+                            reverse_dictionary[dictionary[word]] = word
+                            category_notfound += 1
+                        category_found += 1
+                        if test_set > 0 and random.random() <= test_set:
+                            test_set_size += 1
+                            evaluation_current.append(dictionary[word])
+                        else:
+                            training_set_size += 1
+                            page_categories.append(dictionary[word])
+                    if len(page_categories) > maxPages:
+                        maxPages = len(page_categories)
+                        maxPagesTitle = page_title
+            except csv.Error:
+                print(u"Dunno why this error happens")
     print(len(pages), "pages parsed.", "Page with most categories: ", maxPagesTitle, "with", maxPages, "categories")
     print("Training set size:", training_set_size, "Test set size:", test_set_size)
     print("Pages found:", found, "Pages not found:", notfound)

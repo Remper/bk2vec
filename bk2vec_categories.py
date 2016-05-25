@@ -87,14 +87,25 @@ class Pages:
                 batch.append(ele)
         return batch_indexes, batch
 
+    def _add_elements(self, pages, batch_indexes, batch):
+        global dictionary
+        if len(pages) > 10:
+            log.print("Too deep recursion: ", dictionary.rev_dict[pages[-1]], "Batch size:", len(batch_indexes))
+            return
+        page = pages[-1]
+        if page in self._pages:
+            for ele in self._pages[page]:
+                if ele in pages:
+                    continue
+                batch_indexes.append(page)
+                batch.append(ele)
+                #self._add_elements(pages+[ele], batch_indexes, batch)
+
     def generate_batch(self, input_batch, target_batch):
         batch_indexes = list()
         batch = list()
         for page in input_batch+target_batch.flatten():
-            if page in self._pages:
-                for ele in self._pages[page]:
-                    batch_indexes.append(page)
-                    batch.append(ele)
+            self._add_elements([page], batch_indexes, batch)
         # Batch should never be empty
         if len(batch) == 0:
             batch.append(0)
