@@ -122,6 +122,14 @@ def matrix_distance(tensor1, tensor2):
         return distance
 
 
+def cosine_matrix_distance(tensor1, tensor2):
+    with tf.name_scope("cosine_matrix_distance"):
+        tensor1 = tf.nn.l2_normalize(tensor1, dim=1)
+        tensor2 = tf.nn.l2_normalize(tensor2, dim=1)
+        result = tf.abs(tf.matmul(tensor1, tensor2, transpose_b=True))
+        return tf.sub(tf.ones_like(result), result)
+
+
 def centroid(tensor):
     with tf.name_scope("centroid"):
         return tf.reduce_mean(tensor, 0)
@@ -235,7 +243,7 @@ class TrainingWorker(Thread):
             else:
                 writer.add_summary(summary, step)
 
-            if count % 4000 == 0 and (count // 4000) % proc_threads == self._idx:
+            if count % 2000 == 0 and (count // 2000) % proc_threads == self._idx:
                 average_loss /= count - last_count
                 log.print("[Worker "+str(self._idx)+"] Average loss at step "+get_num_stems_str(step)+":",
                           "%.5f" % average_loss)

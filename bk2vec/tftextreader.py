@@ -7,7 +7,7 @@ import time
 import tensorflow as tf
 from bk2vec.dictionary import Dictionary
 
-DEFAULT_BATCH_SIZE = 512
+DEFAULT_BATCH_SIZE = 1024
 DEFAULT_THREADS = 2
 DEFAULT_READERS = 2
 DICTIONARY_THRESHOLD = 4

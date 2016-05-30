@@ -60,10 +60,13 @@ class Analogy:
                 if len(row) != 4:
                     print("Inconsistent file: ", " ".join(row))
                     continue
+                not_found = False
                 for word in row:
                     if word not in dictionary:
                         print("Word", word, "not in dictionary")
-                        continue
+                        not_found = True
+                if not_found:
+                    continue
                 entries.append([dictionary[word] for word in row])
         return Analogy(entries)
 
