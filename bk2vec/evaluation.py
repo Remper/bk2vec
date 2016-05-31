@@ -25,7 +25,7 @@ class Analogy:
                 self._op = tf.gather(embeddings, input_op)
         return self._op
 
-    def calculate_analogy(self, session):
+    def calculate_analogy(self, session, embeddings_size=None):
         if self._op is None:
             print("Operation hasn't been registered. Ignoring")
             return 0
@@ -41,6 +41,8 @@ class Analogy:
         if previous < analogy1.shape[0]:
             score += np.diag(cdist(analogy1[previous:], analogy2[previous:])).sum()
         score /= analogy1.shape[0]
+        if embeddings_size is not None:
+            score /= embeddings_size
         summary = tf.Summary()
         value = summary.value.add()
         value.tag = "analogy/score"
@@ -63,7 +65,6 @@ class Analogy:
                 not_found = False
                 for word in row:
                     if word not in dictionary:
-                        print("Word", word, "not in dictionary")
                         not_found = True
                 if not_found:
                     continue

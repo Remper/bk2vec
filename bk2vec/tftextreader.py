@@ -12,21 +12,48 @@ DEFAULT_THREADS = 2
 DEFAULT_READERS = 2
 DICTIONARY_THRESHOLD = 4
 
+
 class TextReader:
     def __init__(self, filename, window_size, threads=DEFAULT_THREADS, batch_size=DEFAULT_BATCH_SIZE):
-        print("Text reader initialized with threads ("+str(threads)+"), batch size ("+str(batch_size)+")")
+        print("Text reader initialized with threads (" + str(threads) + "), batch size (" + str(batch_size) + ")")
         self.filename = filename
         self._window_size = window_size
         self._reading_op = None
+        self._category_op = None
+        self._relations_op = None
+        self._debug_op = None
         self._threads = threads
         self._batch_size = batch_size
-        self._debug_op = None
         self._reader_stats = None
+        self._relations = None
+        self._add_categories = False
+        self._add_relations = False
+
+    def set_relations(self, relations):
+        self._relations = relations
+
+    def enable_categories(self):
+        if self._relations is not None:
+            self._add_categories = True
+
+    def enable_relations(self):
+        if self._relations is not None:
+            self._add_relations = True
+
+    def get_category_ops(self):
+        if self._category_op is None:
+            raise Exception("Category operation wasn't initialized")
+        return self._category_op
+
+    def get_relations_ops(self):
+        if self._relations_op is None:
+            raise Exception("Relations operation wasn't initialized")
+        return self._relations_op
 
     def get_reading_ops(self):
         if self._reading_op is None:
             filename_queue = tf.train.string_input_producer([self.filename])
-            reader = tf.FixedLengthRecordReader(record_bytes=4*DEFAULT_BATCH_SIZE)
+            reader = tf.FixedLengthRecordReader(record_bytes=4 * DEFAULT_BATCH_SIZE)
             self._reader_stats = reader.num_records_produced()
             key, value = reader.read(filename_queue)
 
@@ -36,17 +63,18 @@ class TextReader:
                                    batch_size=self._batch_size,
                                    num_threads=DEFAULT_READERS,
                                    enqueue_many=True,
-                                   capacity=self._batch_size*10,
+                                   capacity=self._batch_size * 10,
                                    name="word_buffer")
             expanded_batch = tf.expand_dims(batch, 1)
             examples = list()
 
             def append_example(example, name):
-                examples.append(tf.concat(1, [expanded_batch, tf.expand_dims(example, 1)], name='batch-window'+name))
+                examples.append(tf.concat(1, [expanded_batch, tf.expand_dims(example, 1)], name='batch-window' + name))
 
             for window in range(1, self._window_size + 1):
-                append_example(tf.slice(tf.pad(batch, [[window, 0]]), [0], [self._batch_size]), '-p'+str(window))
-                append_example(tf.pad(tf.slice(batch, [window], [self._batch_size - window]), [[0, window]]), '-m'+str(window))
+                append_example(tf.slice(tf.pad(batch, [[window, 0]]), [0], [self._batch_size]), '-p' + str(window))
+                append_example(tf.pad(tf.slice(batch, [window], [self._batch_size - window]), [[0, window]]),
+                               '-m' + str(window))
             examples = tf.concat(0, examples)
 
             # Filtering zeros
@@ -57,18 +85,54 @@ class TextReader:
             examples = tf.train.shuffle_batch([filtered_examples],
                                               batch_size=self._batch_size,
                                               num_threads=self._threads,
-                                              capacity=self._batch_size*self._threads*5,
-                                              min_after_dequeue=self._batch_size*self._threads,
+                                              capacity=self._batch_size * self._threads * 5,
+                                              min_after_dequeue=self._batch_size * self._threads,
                                               enqueue_many=True,
                                               name="batch_buffer")
-            examples = tf.split(1, 2, examples)
-            self._reading_op = examples
+
+            ops = [examples]
+            if self._add_categories:
+                categorical_examples = tf.py_func(
+                    lambda examples: self._relations.generate_categorical_batch(examples),
+                    [examples], [tf.int32],
+                    name="categorical_batch"
+                )[0]
+                ops.append(tf.reshape(categorical_examples, [-1, 2]))
+
+            if self._add_relations:
+                relational_examples = tf.py_func(
+                    lambda examples: self._relations.generate_relational_batch(examples),
+                    [examples], [tf.int32],
+                    name="relational_batch"
+                )[0]
+                ops.append(tf.reshape(relational_examples, [-1, 5]))
+
+            batch_queue_capacity = self._threads * len(ops) * 10
+            batch_queue = tf.FIFOQueue(
+                capacity=batch_queue_capacity,
+                dtypes=[tf.int32] * len(ops),
+                name="preprocessing_buffer"
+            )
+            tf.scalar_summary(
+                "queue/%s/fraction_of_%d_full" % (batch_queue.name, batch_queue_capacity),
+                tf.cast(batch_queue.size(), tf.float32) * (1. / batch_queue_capacity)
+            )
+            queue_runner = tf.train.QueueRunner(batch_queue, [batch_queue.enqueue(ops)] * self._threads)
+            tf.train.add_queue_runner(queue_runner)
+            example_tuple = batch_queue.dequeue()
+
+            # TODO: don't split if possible
+            self._reading_op = tf.split(1, 2, example_tuple[0])
+            if self._add_categories:
+                self._category_op = example_tuple[1]
+            if self._add_relations:
+                self._relations_op = example_tuple[2]
         return self._reading_op
 
     def get_reader_stats(self, session):
         if self._reader_stats is None:
             raise Exception("Reader stats operation wasn't initialized")
-        return self._reader_stats.eval(session=session)*DEFAULT_BATCH_SIZE
+        return self._reader_stats.eval(session=session) * DEFAULT_BATCH_SIZE
 
     def get_debug_op(self):
         if self._debug_op is None:

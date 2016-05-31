@@ -8,8 +8,8 @@ from params import CATEGORIES_TOKEN
 from bk2vec.evaluation import *
 from bk2vec.arguments import Arguments
 from bk2vec.embeddings import Embeddings
+from bk2vec.relations import Relations
 from bk2vec.tftextreader import *
-from bk2vec.textreader import build_pages
 from bk2vec.utils import *
 from bk2vec.nce_loss import nce_loss
 
@@ -44,21 +44,28 @@ if not os.path.exists(text_reader.filename):
 else:
     dictionary = text_reader.restore_dictionary()
 
-tasks = list()
-old_vocabulary_size = len(dictionary)
-pages, evaluation = build_pages(CATEGORIES, dictionary.dict, dictionary.rev_dict)
-vocabulary_size = len(dictionary)
-log.print('Vocabulary size: ', vocabulary_size)
+
+relations = Relations(dictionary)
 if not args.clean:
-    log.print('Started storing test and training set')
-    tasks.append(dump_evaluation(evaluation, "test", folder=args.output))
-    tasks.append(dump_evaluation(pages, "train", folder=args.output))
+    text_reader.set_relations(relations)
+    text_reader.enable_categories()
+    timestamp = time.time()
+    old_vocabulary_size = len(dictionary)
+    relations.load_categories(CATEGORIES)
+    if not args.norelations:
+        text_reader.enable_relations()
+        relations.load_relations()
+    vocabulary_size = len(dictionary)
+    log.print('Knowledge loaded ('+('%.2f' % (time.time() - timestamp))+'s)')
+    log.print('  Unique relations loaded: ', relations.get_num_relations())
+    log.print('  Words with categories: ', relations.get_num_words_with_categories())
+
     difference = vocabulary_size - old_vocabulary_size
     if difference > 0:
-        log.print('Added', difference, 'words. Updating dictionary')
-        log.print('Updating dictionary')
+        log.print('Added', difference, 'words. Updating dictionary:')
         text_reader.store_dictionary(dictionary)
-del evaluation
+vocabulary_size = len(dictionary)
+log.print('Vocabulary size: ', vocabulary_size)
 
 wordsim353 = WordSimilarity.wordsim353("datasets/combined.csv", dictionary.dict)
 simlex999 = WordSimilarity.simlex999("datasets/SimLex-999.txt", dictionary.dict)
@@ -66,59 +73,13 @@ log.print("Similarity pairs loaded")
 analogy = Analogy.from_file("datasets/questions-words.txt", dictionary.dict)
 log.print("Analogy entries loaded")
 
-
-class Pages:
-    def __init__(self, pages):
-        self._pages = pages
-        self._generator = self._get_next_page()
-
-    def _get_next_page(self):
-        while True:
-            for page in self._pages.keys():
-                yield page
-
-    def generate_detached_batch(self, batch_size):
-        batch_indexes = list()
-        batch = list()
-        while len(batch_indexes) < batch_size:
-            page = self._generator.next()
-            for ele in self._pages[page]:
-                batch_indexes.append(page)
-                batch.append(ele)
-        return batch_indexes, batch
-
-    def _add_elements(self, pages, batch_indexes, batch):
-        global dictionary
-        if len(pages) > 10:
-            log.print("Too deep recursion: ", dictionary.rev_dict[pages[-1]], "Batch size:", len(batch_indexes))
-            return
-        page = pages[-1]
-        if page in self._pages:
-            for ele in self._pages[page]:
-                if ele in pages:
-                    continue
-                batch_indexes.append(page)
-                batch.append(ele)
-                #self._add_elements(pages+[ele], batch_indexes, batch)
-
-    def generate_batch(self, input_batch, target_batch):
-        batch_indexes = list()
-        batch = list()
-        for page in input_batch+target_batch.flatten():
-            self._add_elements([page], batch_indexes, batch)
-        # Batch should never be empty
-        if len(batch) == 0:
-            batch.append(0)
-            batch_indexes.append(0)
-        return np.array(batch_indexes, dtype=np.int32), np.array(batch, dtype=np.int32)
-
-
 # Step 4: Build and train a skip-gram model.
+
 
 def matrix_distance(tensor1, tensor2):
     with tf.name_scope("matrix_distance"):
-        sub = tf.sub(tensor1, tensor2)
-        distance = tf.sqrt(tf.clip_by_value(tf.reduce_sum(tf.pow(sub, 2), 1), 1e-10, 1e+37))
+        diff = tf.squared_difference(tensor1, tensor2)
+        distance = tf.sqrt(tf.clip_by_value(tf.reduce_sum(diff, 1), 1e-10, 1e+37))
         return distance
 
 
@@ -178,35 +139,63 @@ with graph.as_default():
     joint_loss = loss
 
     if not args.clean:
-        # Recalculating centroids for words in a batch
-        train_category_indexes, train_categories = tf.py_func(
-            lambda batch, labels: pages.generate_batch(batch, labels),
-            [train_inputs, train_labels], [tf.int32, tf.int32]
-        )
-        #train_categories = tf.to_int32(train_categories)
-        #train_category_indexes = tf.to_int32(train_category_indexes)
+        losses = [loss]
+
         with tf.name_scope("category_distances"):
             # Calculating distances towards category tokens
+            categorical_batch = text_reader.get_category_ops()
             category_distances = matrix_distance(
-                tf.gather(embeddings.tensor(), train_categories),
-                tf.gather(embeddings.tensor(), train_category_indexes)
+                tf.gather(embeddings.tensor(), categorical_batch[:, 0]),
+                tf.gather(embeddings.tensor(), categorical_batch[:, 1])
             )
             # Margin (we don't want categories to be squashed into the single dot)
             if args.margin > 0:
                 with tf.name_scope("margin_cutoff"):
-                    category_distances = tf.maximum(
-                        tf.sub(category_distances, tf.constant(args.margin, dtype=tf.float32)),
-                        tf.zeros_like(category_distances)
+                    category_distances = tf.abs(
+                        tf.sub(category_distances, tf.constant(args.margin, dtype=tf.float32))
                     )
 
         # Categorical knowledge additional term
-        with tf.name_scope("category_loss"):
+        with tf.name_scope("categorical_loss"):
             # Building category objective which is average distance to word centroid
             category_loss = tf.reduce_mean(category_distances)
-            #category_loss = tf.mul(tf.constant(10.0), category_loss, name="category_contrib_coeff")
+            # category_loss = tf.mul(tf.constant(10.0), category_loss, name="category_contrib_coeff")
             category_loss_summary = tf.scalar_summary("category_loss", category_loss)
+        losses.append(category_loss)
 
-        joint_loss = tf.add(loss, category_loss, name="joint_loss")
+        if not args.norelations:
+
+            with tf.name_scope("relation_distances"):
+                relational_batch = text_reader.get_relations_ops()
+                t_rel_word1 = tf.gather(embeddings.tensor(), relational_batch[:, 0])
+                t_relations = tf.gather(embeddings.tensor(), relational_batch[:, 1])
+                t_rel_word2 = tf.gather(embeddings.tensor(), relational_batch[:, 2])
+                t_rel_cor_word1 = tf.gather(embeddings.tensor(), relational_batch[:, 3])
+                t_rel_cor_word2 = tf.gather(embeddings.tensor(), relational_batch[:, 4])
+
+                true_relation_distances = matrix_distance(
+                    tf.add(t_rel_word1, t_relations),
+                    t_rel_word2
+                )
+                false_relation_distances = matrix_distance(
+                    tf.add(t_rel_cor_word1, t_relations),
+                    t_rel_cor_word2
+                )
+                relation_distances = tf.abs(tf.add(
+                    tf.sub(true_relation_distances, false_relation_distances),
+                    tf.constant(1.0)
+                ))
+
+            # Relational knowledge additional term
+            with tf.name_scope("relational_loss"):
+                # Building category objective which is average distance to word centroid
+                relational_loss = tf.reduce_mean(relation_distances)
+                #relational_loss += tf.contrib.layers.l2_regularizer(0.01)(embeddings.tensor())
+                # relational_loss = tf.mul(tf.constant(10.0), relational_loss, name="category_contrib_coeff")
+                relational_loss_summary = tf.scalar_summary("relational_loss", relational_loss)
+            losses.append(relational_loss)
+
+        joint_loss = tf.add_n(losses, name="joint_loss")
     joint_loss = tf.clip_by_value(joint_loss, 1e-10, args.num_sampled*10)
 
     # Construct the SGD optimizer using a learning rate of 1.0.
@@ -261,7 +250,6 @@ with tf.Session(graph=graph) as session:
     threads = tf.train.start_queue_runners(coord=coord)
 
     step = 0
-    pages = Pages(pages)
     workers = list()
     for idx in range(proc_threads):
         worker = TrainingWorker(idx, args.iterations, session, writer)
@@ -308,7 +296,7 @@ with tf.Session(graph=graph) as session:
         simlex999_time = time.time() - timestamp
         timestamp = time.time()
         if show % 10 == 0:
-            summary, score = analogy.calculate_analogy(session)
+            summary, score = analogy.calculate_analogy(session, embeddings.size)
             writer.add_summary(summary, newstep)
             log.print("Analogy score: ", "%.3f" % score)
         analogy_time = time.time() - timestamp

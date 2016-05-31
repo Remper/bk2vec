@@ -1,11 +1,13 @@
 from __future__ import absolute_import
 from __future__ import print_function
 
+
 class Dictionary():
     def __init__(self):
         self.unknown = 'UNK'
-        self.dict = {self.unknown: 0}
-        self.rev_dict = {0: self.unknown}
+        self.null_rel = 'NULL_REL'
+        self.dict = {self.unknown: 0, self.null_rel: 1}
+        self.rev_dict = {0: self.unknown, 1: self.null_rel}
 
     def __len__(self):
         return len(self.dict)

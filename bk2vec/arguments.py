@@ -39,6 +39,7 @@ class Arguments(AbstractArguments):
         self.args.clean = bool(self.args.clean)
         self.args.notoken = bool(self.args.notoken)
         self.args.blacklist = bool(self.args.blacklist)
+        self.args.norelations = bool(self.args.norelations)
         if self.args.output != '' and not self.args.output.endswith('/'):
             self.args.output += '/'
 
@@ -71,6 +72,8 @@ class Arguments(AbstractArguments):
         parser.add_argument('--output', default='', help='Output dir (default - current dir)', metavar='#')
         parser.add_argument('--clean', default=False, action='store_true',
                             help='Calculate only plain skipgram objective')
+        parser.add_argument('--norelations', default=False, action='store_true',
+                            help='Turn off relational knowledge')
         return parser
 
 
