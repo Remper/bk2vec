@@ -137,6 +137,8 @@ class Relations:
     def generate_categorical_batch(self, input_examples):
         batch = list()
         for word in input_examples[:, 0] + input_examples[:, 1]:
+            if len(batch) >= input_examples.shape[0]:
+                break
             if word in self._categories:
                 for category in self._categories[word]:
                     batch.append([word, category])

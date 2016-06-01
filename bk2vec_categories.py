@@ -138,6 +138,8 @@ with graph.as_default():
 
     joint_loss = loss
 
+    category_size = tf.constant(0)
+    relation_size = tf.constant(0)
     if not args.clean:
         losses = [loss]
 
@@ -154,6 +156,7 @@ with graph.as_default():
                     category_distances = tf.abs(
                         tf.sub(category_distances, tf.constant(args.margin, dtype=tf.float32))
                     )
+            category_size = tf.size(category_distances)
 
         # Categorical knowledge additional term
         with tf.name_scope("categorical_loss"):
@@ -185,12 +188,13 @@ with graph.as_default():
                     tf.sub(true_relation_distances, false_relation_distances),
                     tf.constant(1.0)
                 ))
+                relation_size = tf.size(relation_distances)
 
             # Relational knowledge additional term
             with tf.name_scope("relational_loss"):
                 # Building category objective which is average distance to word centroid
                 relational_loss = tf.reduce_mean(relation_distances)
-                #relational_loss += tf.contrib.layers.l2_regularizer(0.01)(embeddings.tensor())
+                relational_loss += tf.contrib.layers.l2_regularizer(0.01)(embed)
                 # relational_loss = tf.mul(tf.constant(10.0), relational_loss, name="category_contrib_coeff")
                 relational_loss_summary = tf.scalar_summary("relational_loss", relational_loss)
             losses.append(relational_loss)
@@ -218,13 +222,17 @@ class TrainingWorker(Thread):
     def run(self):
         step = global_step.eval(self._session)
         average_loss = 0
+        average_cats = 0
+        average_rels = 0
         count = 0
         last_count = 0
         while step < self._iterations:
-            step, summary, _, loss_val = self._session.run(
-                [global_step, merged, optimizer, joint_loss]
+            step, summary, _, loss_val, cur_cat_size, cur_rel_size = self._session.run(
+                [global_step, merged, optimizer, joint_loss, category_size, relation_size]
             )
             average_loss += loss_val
+            average_cats += cur_cat_size
+            average_rels += cur_rel_size
             count += 1
             if self._iterations > 5000000:
                 if count % int(math.log(self._iterations)) == 0:
@@ -234,10 +242,15 @@ class TrainingWorker(Thread):
 
             if count % 2000 == 0 and (count // 2000) % proc_threads == self._idx:
                 average_loss /= count - last_count
+                average_cats /= count - last_count
+                average_rels /= count - last_count
                 log.print("[Worker "+str(self._idx)+"] Average loss at step "+get_num_stems_str(step)+":",
-                          "%.5f" % average_loss)
+                          "%.5f" % average_loss,
+                          "(avg cats:", ("%.2f" % average_cats)+", avg rels:", ("%.2f" % average_rels)+")")
                 last_count = count
                 average_loss = 0
+                average_rels = 0
+                average_cats = 0
 
 # Step 5: Begin training.
 with tf.Session(graph=graph) as session:
