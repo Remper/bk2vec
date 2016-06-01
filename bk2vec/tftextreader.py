@@ -39,6 +39,7 @@ class TextReader:
     def enable_relations(self):
         if self._relations is not None:
             self._add_relations = True
+            self.enable_categories()
 
     def get_category_ops(self):
         if self._category_op is None:
@@ -92,20 +93,20 @@ class TextReader:
 
             ops = [examples]
             if self._add_categories:
-                categorical_examples = tf.py_func(
+                categorical_examples, categories_populated = tf.py_func(
                     lambda examples: self._relations.generate_categorical_batch(examples),
-                    [examples], [tf.int32],
+                    [examples], [tf.int32, tf.int32],
                     name="categorical_batch"
-                )[0]
+                )
                 ops.append(tf.reshape(categorical_examples, [-1, 2]))
 
-            if self._add_relations:
-                relational_examples = tf.py_func(
-                    lambda examples: self._relations.generate_relational_batch(examples),
-                    [examples], [tf.int32],
-                    name="relational_batch"
-                )[0]
-                ops.append(tf.reshape(relational_examples, [-1, 5]))
+                if self._add_relations:
+                    relational_examples = tf.py_func(
+                        lambda examples, categories: self._relations.generate_relational_batch(examples, categories),
+                        [examples, categories_populated], [tf.int32],
+                        name="relational_batch"
+                    )[0]
+                    ops.append(tf.reshape(relational_examples, [-1, 5]))
 
             batch_queue_capacity = self._threads * len(ops) * 10
             batch_queue = tf.FIFOQueue(
@@ -121,11 +122,16 @@ class TextReader:
             tf.train.add_queue_runner(queue_runner)
             example_tuple = batch_queue.dequeue()
 
+            if not isinstance(example_tuple, list):
+                reading_op = example_tuple
+            else:
+                reading_op = example_tuple[0]
             # TODO: don't split if possible
-            self._reading_op = tf.split(1, 2, example_tuple[0])
+            self._reading_op = tf.split(1, 2, reading_op)
             if self._add_categories:
                 self._category_op = example_tuple[1]
             if self._add_relations:
+                self._debug_op.append(example_tuple[2])
                 self._relations_op = example_tuple[2]
         return self._reading_op
 

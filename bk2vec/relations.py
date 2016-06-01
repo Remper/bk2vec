@@ -6,6 +6,7 @@ import csv
 import time
 import random
 import numpy as np
+from itertools import cycle, islice
 
 CATEGORIES_FILE = 'datasets/wnCategories.tsv.gz'
 RELATIONS_FILE = 'datasets/wnRelations.tsv.gz'
@@ -99,10 +100,25 @@ class Relations:
         else:
             word2_rel[relation_tuple.relation] = relation_tuple.word1
 
-    def generate_relational_batch(self, input_examples):
+    def roundrobin(self, iterables):
+        "roundrobin('ABC', 'D', 'EF') --> A D E B F C"
+        pending = len(iterables)
+        nexts = cycle(iter(it).next for it in iterables)
+        while pending:
+            try:
+                for next in nexts:
+                    yield next()
+            except StopIteration:
+                pending -= 1
+                nexts = cycle(islice(nexts, pending))
+
+    def generate_relational_batch(self, input_examples, input_categories):
         batch = list()
         # Generating examples
-        for word in input_examples[:, 0] + input_examples[:, 1]:
+        max_examples = input_examples.shape[0]/2
+        for word in self.roundrobin([input_categories, input_examples[:, 0]]):
+            if len(batch) >= max_examples:
+                break
             if word not in self._relations:
                 continue
             word_rel = self._relations[word]
@@ -112,40 +128,44 @@ class Relations:
                 batch.append([word_rel.backward[relation], relation, word])
         # A batch should never be empty
         if len(batch) == 0:
-            batch.append([0, 1, 0])
-        # Generating corrupted examples
-        indices = range(len(batch))
-        for idx in indices:
-            # Randomly select wrong source and target word for the same relation
-            rand_idx = random.choice(indices)
-            rand_word1 = batch[rand_idx][0]
-            rand_word2 = batch[rand_idx][2]
-            relation = batch[idx][1]
+            batch.append([0, 1, 0, 0, 1])
+        else:
+            # Generating corrupted examples
+            indices = range(len(batch))
+            for idx in indices:
+                # Randomly select wrong source and target word for the same relation
+                rand_idx = random.choice(indices)
+                rand_word1 = batch[rand_idx][0]
+                rand_word2 = batch[rand_idx][2]
+                relation = batch[idx][1]
 
-            if rand_word1 in self._relations:
-                rel = self._relations[rand_word1].forward
-            else:
-                rel = self._relations[rand_word2].backward
-            if relation in rel and (rel[relation] == rand_word2 or rel[relation] == rand_word1):
-                # UNK + NULL_REL != NULL_REL (unless UNK is inferred to be zero, which wouldn't add to objective)
-                batch[idx].extend([0, 1])
-            else:
-                batch[idx].extend([rand_word1, rand_word2])
+                if rand_word1 in self._relations:
+                    rel = self._relations[rand_word1].forward
+                else:
+                    rel = self._relations[rand_word2].backward
+                if relation in rel and (rel[relation] == rand_word2 or rel[relation] == rand_word1):
+                    # UNK + NULL_REL != NULL_REL (unless UNK is inferred to be zero, which wouldn't add to objective)
+                    batch[idx].extend([0, 1])
+                else:
+                    batch[idx].extend([rand_word1, rand_word2])
 
         return self._arr(batch)
 
     def generate_categorical_batch(self, input_examples):
         batch = list()
+        categories = list()
         for word in input_examples[:, 0] + input_examples[:, 1]:
             if len(batch) >= input_examples.shape[0]:
                 break
             if word in self._categories:
                 for category in self._categories[word]:
+                    if category not in categories:
+                        categories.append(category)
                     batch.append([word, category])
         # A batch should never be empty
         if len(batch) == 0:
             batch.append([0, 0])
-        return self._arr(batch)
+        return self._arr(batch), self._arr(categories)
 
     @staticmethod
     def _arr(arr):

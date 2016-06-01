@@ -287,7 +287,19 @@ with tf.Session(graph=graph) as session:
 
         show += 1
         if show % 10 == 0:
-            batch, examples, filtered_examples = session.run(text_reader.get_debug_op())
+            debug_results = session.run(text_reader.get_debug_op())
+            batch, examples, filtered_examples = debug_results[:3]
+            if len(debug_results) > 3:
+                relations_debug = debug_results[3]
+                total = relations_debug.shape[0]
+                num = 5
+                if total < num:
+                    num = total
+                print("Relations (showing %d out of %d):" % (num, total))
+                for idx in range(num):
+                    debug_example = [dictionary.rev_dict[ele] for ele in relations_debug[idx]]
+                    print(debug_example[0], '-('+debug_example[1]+')>', debug_example[2], "(Corrupted:",
+                          debug_example[3], '-(' + debug_example[1] + ')>', debug_example[4]+')')
             print("Batch resolved: ", " ".join([dictionary.rev_dict[ele] for ele in batch[-20:]]))
             #print("Batch: ", batch.shape, batch[-20])
             #print("Examples: ", examples.shape, examples[-50:])
@@ -311,7 +323,7 @@ with tf.Session(graph=graph) as session:
         if show % 10 == 0:
             summary, score = analogy.calculate_analogy(session, embeddings.size)
             writer.add_summary(summary, newstep)
-            log.print("Analogy score: ", "%.3f" % score)
+            log.print("Analogy score: ", "%.10f" % score)
         analogy_time = time.time() - timestamp
         timeadj = wordsim353_time + simlex999_time + analogy_time
         if timeadj > 10:
@@ -324,7 +336,8 @@ with tf.Session(graph=graph) as session:
     coord.request_stop()
     coord.join(threads)
 
-    del pages
+    del relations
+    del text_reader
     timestamp = time.time()
     norm_tensor = embeddings.normalized_tensor().eval()
     log.print("Tensor normalized in", ("%.5f" % (time.time() - timestamp)), "s")
@@ -337,7 +350,7 @@ embeddings.dump(
     dictionary
 )
 
-log.print("Waiting for evaluation dumping to finish...")
-control_evaluation(tasks)
+#log.print("Waiting for evaluation dumping to finish...")
+#control_evaluation(tasks)
 log.print("Done")
 log.close()
