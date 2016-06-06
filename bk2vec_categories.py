@@ -205,10 +205,10 @@ with graph.as_default():
     # Construct the SGD optimizer using a learning rate of 1.0.
     loss_summary = tf.scalar_summary("joint_loss", joint_loss)
     learning_rate = 1.0
-    #learning_rate = tf.train.exponential_decay(1.0, global_step,
-    #                                           150000, 0.9, staircase=True)
+    #learning_rate = tf.train.exponential_decay(1.0, global_step, 150000, 0.9, staircase=True)
     optimizer = tf.train.AdagradOptimizer(learning_rate, use_locking=True, name="joint_objective").minimize(joint_loss, global_step=global_step)
     merged = tf.merge_all_summaries()
+    embeddings.normalized_tensor()
 
 
 class TrainingWorker(Thread):
@@ -253,6 +253,7 @@ class TrainingWorker(Thread):
                 average_cats = 0
 
 # Step 5: Begin training.
+tasks = []
 with tf.Session(graph=graph) as session:
     timestamp = time.time()
     writer = tf.train.SummaryWriter("logs", graph)
@@ -298,8 +299,8 @@ with tf.Session(graph=graph) as session:
                 print("Relations (showing %d out of %d):" % (num, total))
                 for idx in range(num):
                     debug_example = [dictionary.rev_dict[ele] for ele in relations_debug[idx]]
-                    print(debug_example[0], '-('+debug_example[1]+')>', debug_example[2], "(Corrupted:",
-                          debug_example[3], '-(' + debug_example[1] + ')>', debug_example[4]+')')
+                    print(debug_example[0], '-(' + debug_example[1] + ')>', debug_example[2], "(Corrupted:",
+                          debug_example[3], '-(' + debug_example[1] + ')>', debug_example[4] + ')')
             print("Batch resolved: ", " ".join([dictionary.rev_dict[ele] for ele in batch[-20:]]))
             #print("Batch: ", batch.shape, batch[-20])
             #print("Examples: ", examples.shape, examples[-50:])
@@ -333,6 +334,35 @@ with tf.Session(graph=graph) as session:
                       "%.2f" % analogy_time,
                       "("+str(int(timeadj))+"s total)")
 
+        if show % 200 == 0:
+            log.print("Waiting for old tasks to complete...")
+            alive_tasks = []
+            for task in tasks:
+                if task.is_alive():
+                    alive_tasks.append(task)
+            if len(alive_tasks) == 0:
+                tasks = []
+                timestamp = time.time()
+                norm_tensor = embeddings.normalized_tensor().eval()
+                log.print("Tensor normalized in", ("%.5f" % (time.time() - timestamp)), "s")
+                log.print("Dumping embeddings")
+                output_file = args.output + 'embeddings-prov-' + str(embeddings.size) + '-' + get_num_stems_str(args.iterations) + '.tsv'
+                dump_task = EmbeddingsDumper(
+                    embeddings,
+                    norm_tensor,
+                    dictionary,
+                    save_to=output_file
+                )
+                dump_task.start()
+                analogy_task = AnalogyCalculation(analogy, norm_tensor, log)
+                analogy_task.start()
+                tasks.append(dump_task)
+                tasks.append(analogy_task)
+                del norm_tensor
+            else:
+                log.print("Skipping analogy calculation and embeddings dumping because previous run hasn't completed yet")
+                tasks = alive_tasks
+
     coord.request_stop()
     coord.join(threads)
 
@@ -344,11 +374,15 @@ with tf.Session(graph=graph) as session:
 
 # Step 6: Dump embeddings to file
 log.print("Dumping embeddings on disk")
-embeddings.dump(
-    args.output+'embeddings-' + str(embeddings.size) + '-' + get_num_stems_str(args.iterations) + '.tsv',
+control_tasks(tasks)
+dump_task = EmbeddingsDumper(
+    embeddings,
     norm_tensor,
-    dictionary
+    dictionary,
+    args.output+'embeddings-' + str(embeddings.size) + '-' + get_num_stems_str(args.iterations) + '.tsv'
 )
+dump_task.start()
+dump_task.join()
 
 #log.print("Waiting for evaluation dumping to finish...")
 #control_evaluation(tasks)

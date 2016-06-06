@@ -53,11 +53,12 @@ class Log:
 
     @synchronized(print_lock)
     def print(self, *args):
-        if self._log is None:
-            self.init_log()
         print(*args)
-        self._log.write(" ".join([str(ele) for ele in args]))
-        self._log.write('\n')
+        if 'output' in self._args:
+            if self._log is None:
+                self.init_log()
+            self._log.write(" ".join([str(ele) for ele in args]))
+            self._log.write('\n')
 
     def close(self):
         self._log.close()

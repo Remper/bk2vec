@@ -9,6 +9,7 @@ from scipy.spatial.distance import cdist
 
 import gzip
 import csv
+import time
 import numpy as np
 import tensorflow as tf
 
@@ -24,6 +25,39 @@ class Analogy:
                 input_op = tf.constant(self._entries, name="analogy_entries")
                 self._op = tf.gather(embeddings, input_op)
         return self._op
+
+    def calculate_accuracy(self, embeddings):
+        vectors = list()
+        results = list()
+        for entry in self._entries:
+            vectors.append(embeddings[entry[1]]-embeddings[entry[0]]+embeddings[entry[2]])
+            results.append(entry+[
+                np.linalg.norm(embeddings[entry[1]]-embeddings[entry[0]]),
+                np.linalg.norm(embeddings[entry[3]]-embeddings[entry[2]]),
+            ])
+
+        true = 0
+        processed = 0
+        total = len(vectors)
+        timestamp = time.time()
+        for idx in range(total):
+            if time.time() - timestamp > 200:
+                print("Analogy evaluation: processed", processed, "out of", total,
+                      ", current accuracy:", float(true) / float(total))
+                timestamp = time.time()
+            distances = np.squeeze(cdist(embeddings, [vectors[idx]]))
+            result = np.argsort(distances)
+            ethalon = distances[result[0]]
+            for index in result:
+                if abs(ethalon - distances[index]) > 0.01:
+                    break
+                results[idx].append(index)
+                if index == self._entries[idx][3]:
+                    true += 1
+                    break
+            processed += 1
+
+        return float(true) / float(total), results
 
     def calculate_analogy(self, session, embeddings_size=None):
         if self._op is None:
@@ -191,12 +225,43 @@ class EvaluationDumper(Thread):
         del self._evaluation
 
 
+class EmbeddingsDumper(Thread):
+    def __init__(self, embeddings, tensor, dictionary, save_to=''):
+        Thread.__init__(self)
+        self._embeddings = embeddings
+        self._tensor = tensor
+        self._output = save_to
+        self._dictionary = dictionary
+
+    def run(self):
+        self._embeddings.dump(
+            self._output,
+            self._tensor,
+            self._dictionary
+        )
+
+
+class AnalogyCalculation(Thread):
+    def __init__(self, analogy, tensor, log):
+        Thread.__init__(self)
+        self._analogy = analogy
+        self._tensor = tensor
+        self._log = log
+        self.results = None
+
+    def run(self):
+        analogy_time = time.time()
+        accuracy, self.results = self._analogy.calculate_accuracy(self._tensor)
+        self._log.print("Analogy accuracy:", "%.2f" % accuracy)
+        self._log.print("Done in", "%.2f" % (time.time() - analogy_time), "seconds")
+
+
 def dump_evaluation(evaluation, postfix, folder=''):
     dumper = EvaluationDumper(evaluation, postfix, folder=folder)
     dumper.start()
     return dumper
 
 
-def control_evaluation(threads):
+def control_tasks(threads):
     for dumper in threads:
         dumper.join()
