@@ -4,3 +4,5 @@ logs
 .Python
 *_pb2.py
 params.py
+bk2vec/__pycache__
+*.pyc
